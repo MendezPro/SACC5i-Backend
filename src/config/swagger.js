@@ -69,6 +69,7 @@ const options = {
     },
     tags: [
       { name: 'Autenticación', description: 'Endpoints de registro y login' },
+      { name: 'Admin', description: 'Gestión de usuarios (Solo Admin/Super Admin)' },
       { name: 'Solicitudes', description: 'Gestión de solicitudes ciudadanas' },
       { name: 'Catálogos', description: 'Catálogos del sistema' },
       { name: 'Sistema', description: 'Información del sistema' }

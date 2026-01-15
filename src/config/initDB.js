@@ -24,29 +24,39 @@ const initDatabase = async () => {
     // Usar la base de datos
     await connection.query(`USE ${process.env.DB_NAME || 'sacc5i_db'}`);
 
-    // Tabla de Regiones
+    // ============================================
+    // TABLA: Regiones (Cajas Territoriales)
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS regiones (
         id INT PRIMARY KEY AUTO_INCREMENT,
         nombre VARCHAR(100) NOT NULL UNIQUE,
+        total_municipios INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     console.log('✅ Tabla regiones creada');
 
-    // Tabla de Municipios
+    // ============================================
+    // TABLA: Municipios (Con clave oficial)
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS municipios (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        nombre VARCHAR(100) NOT NULL UNIQUE,
-        region_id INT,
+        clave INT NOT NULL UNIQUE COMMENT 'Clave oficial del municipio',
+        nombre VARCHAR(100) NOT NULL,
+        region_id INT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (region_id) REFERENCES regiones(id) ON DELETE SET NULL
+        FOREIGN KEY (region_id) REFERENCES regiones(id) ON DELETE CASCADE,
+        INDEX idx_clave (clave),
+        INDEX idx_region (region_id)
       )
     `);
     console.log('✅ Tabla municipios creada');
 
-    // Tabla de Tipos de Oficio
+    // ============================================
+    // TABLA: Tipos de Oficio
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS tipos_oficio (
         id INT PRIMARY KEY AUTO_INCREMENT,
@@ -57,7 +67,9 @@ const initDatabase = async () => {
     `);
     console.log('✅ Tabla tipos_oficio creada');
 
-    // Tabla de Estatus de Solicitudes
+    // ============================================
+    // TABLA: Estatus de Solicitudes
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS estatus_solicitudes (
         id INT PRIMARY KEY AUTO_INCREMENT,
@@ -69,33 +81,40 @@ const initDatabase = async () => {
     `);
     console.log('✅ Tabla estatus_solicitudes creada');
 
-    // Tabla de Usuarios
+    // ============================================
+    // TABLA: Usuarios (Con jerarquía real del C5i)
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS usuarios (
         id INT PRIMARY KEY AUTO_INCREMENT,
         nombre_completo VARCHAR(150) NOT NULL,
-        usuario VARCHAR(50) NOT NULL UNIQUE,
+        usuario VARCHAR(50) NOT NULL UNIQUE COMMENT 'Formato: nombre.apellido',
         password VARCHAR(255) NOT NULL,
-        fecha_nacimiento DATE,
-        region VARCHAR(100),
-        extension VARCHAR(20),
-        rol ENUM('usuario', 'administrador', 'operador') DEFAULT 'usuario',
+        extension VARCHAR(20) COMMENT 'Número de extensión del analista',
+        region_id INT NULL COMMENT 'Región asignada (solo para analistas)',
+        rol ENUM('super_admin', 'admin', 'analista') NOT NULL DEFAULT 'analista',
         activo BOOLEAN DEFAULT TRUE,
+        password_changed BOOLEAN DEFAULT FALSE COMMENT 'FALSE obliga a cambiar contraseña',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (region_id) REFERENCES regiones(id) ON DELETE SET NULL,
+        INDEX idx_usuario (usuario),
+        INDEX idx_region (region_id),
+        INDEX idx_rol (rol)
       )
     `);
     console.log('✅ Tabla usuarios creada');
 
-    // Tabla de Solicitudes
+    // ============================================
+    // TABLA: Solicitudes (Trámites)
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS solicitudes (
         id INT PRIMARY KEY AUTO_INCREMENT,
         numero_solicitud VARCHAR(50) UNIQUE NOT NULL,
-        usuario_id INT NOT NULL,
+        usuario_id INT NOT NULL COMMENT 'Analista que procesa',
         tipo_oficio_id INT,
         municipio_id INT,
-        region VARCHAR(100),
         proceso_movimiento VARCHAR(255),
         termino VARCHAR(100),
         dias_horas VARCHAR(50),
@@ -109,12 +128,17 @@ const initDatabase = async () => {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
         FOREIGN KEY (tipo_oficio_id) REFERENCES tipos_oficio(id) ON DELETE SET NULL,
         FOREIGN KEY (municipio_id) REFERENCES municipios(id) ON DELETE SET NULL,
-        FOREIGN KEY (estatus_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL
+        FOREIGN KEY (estatus_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
+        INDEX idx_usuario (usuario_id),
+        INDEX idx_estatus (estatus_id),
+        INDEX idx_fecha (fecha_solicitud)
       )
     `);
     console.log('✅ Tabla solicitudes creada');
 
-    // Tabla de Historial de Cambios
+    // ============================================
+    // TABLA: Historial de Solicitudes
+    // ============================================
     await connection.query(`
       CREATE TABLE IF NOT EXISTS historial_solicitudes (
         id INT PRIMARY KEY AUTO_INCREMENT,
@@ -127,63 +151,14 @@ const initDatabase = async () => {
         FOREIGN KEY (solicitud_id) REFERENCES solicitudes(id) ON DELETE CASCADE,
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
         FOREIGN KEY (estatus_anterior_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
-        FOREIGN KEY (estatus_nuevo_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL
+        FOREIGN KEY (estatus_nuevo_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
+        INDEX idx_solicitud (solicitud_id)
       )
     `);
     console.log('✅ Tabla historial_solicitudes creada');
 
-    // Insertar datos iniciales - Regiones
-    await connection.query(`
-      INSERT IGNORE INTO regiones (nombre) VALUES
-      ('Región I - Norte'),
-      ('Región II - Nororiental'),
-      ('Región III - Centro'),
-      ('Región IV - Sur'),
-      ('Región V - Occidente')
-    `);
-    console.log('✅ Regiones iniciales insertadas');
-
-    // Insertar datos iniciales - Municipios (algunos ejemplos)
-    await connection.query(`
-      INSERT IGNORE INTO municipios (nombre, region_id) VALUES
-      ('Puebla', 3),
-      ('Tehuacán', 4),
-      ('Atlixco', 3),
-      ('San Martín Texmelucan', 3),
-      ('Cholula', 3),
-      ('Huauchinango', 1),
-      ('Teziutlán', 2)
-    `);
-    console.log('✅ Municipios iniciales insertados');
-
-    // Insertar datos iniciales - Tipos de Oficio
-    await connection.query(`
-      INSERT IGNORE INTO tipos_oficio (nombre, descripcion) VALUES
-      ('Alta', 'Solicitud de alta en el sistema'),
-      ('Baja', 'Solicitud de baja del sistema'),
-      ('Consulta', 'Consulta de información'),
-      ('Modificación', 'Modificación de datos'),
-      ('Reporte', 'Reporte de incidencia'),
-      ('Queja', 'Queja ciudadana'),
-      ('Sugerencia', 'Sugerencia de mejora')
-    `);
-    console.log('✅ Tipos de oficio iniciales insertados');
-
-    // Insertar datos iniciales - Estatus
-    await connection.query(`
-      INSERT IGNORE INTO estatus_solicitudes (nombre, descripcion, color) VALUES
-      ('Pendiente', 'Solicitud recibida, pendiente de revisión', '#FFA500'),
-      ('En Proceso', 'Solicitud en proceso de atención', '#2196F3'),
-      ('En Revisión', 'Solicitud en revisión por supervisor', '#FF9800'),
-      ('Aprobada', 'Solicitud aprobada', '#4CAF50'),
-      ('Rechazada', 'Solicitud rechazada', '#F44336'),
-      ('Completada', 'Solicitud completada exitosamente', '#8BC34A'),
-      ('Cancelada', 'Solicitud cancelada por el usuario', '#9E9E9E')
-    `);
-    console.log('✅ Estatus iniciales insertados');
-
-    console.log('\n🎉 Base de datos inicializada correctamente\n');
-    console.log('📊 Puedes iniciar el servidor con: npm run dev\n');
+    console.log('\n🎉 Estructura de base de datos creada correctamente');
+    console.log('📊 Ejecuta el seeder para cargar los datos: npm run seed\n');
 
   } catch (error) {
     console.error('❌ Error al inicializar la base de datos:', error.message);

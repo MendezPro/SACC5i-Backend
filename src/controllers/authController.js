@@ -117,11 +117,14 @@ export const login = async (req, res) => {
         id: user.id,
         nombre_completo: user.nombre_completo,
         usuario: user.usuario,
-        region: user.region,
         extension: user.extension,
+        region_id: user.region_id,
         rol: user.rol,
+        password_changed: user.password_changed,
         token
-      }
+      },
+      // Alerta si no ha cambiado la contraseña
+      warning: !user.password_changed ? 'Por seguridad, se recomienda cambiar tu contraseña temporal' : null
     });
 
   } catch (error) {
@@ -142,7 +145,11 @@ export const getProfile = async (req, res) => {
   
   try {
     const [users] = await connection.query(
-      'SELECT id, nombre_completo, usuario, fecha_nacimiento, region, extension, rol, created_at FROM usuarios WHERE id = ?',
+      `SELECT u.id, u.nombre_completo, u.usuario, u.extension, u.region_id, u.rol, u.password_changed,
+              u.created_at, r.nombre as region_nombre
+       FROM usuarios u
+       LEFT JOIN regiones r ON u.region_id = r.id
+       WHERE u.id = ?`,
       [req.userId]
     );
 
@@ -155,7 +162,8 @@ export const getProfile = async (req, res) => {
 
     res.json({
       success: true,
-      data: users[0]
+      data: users[0],
+      warning: !users[0].password_changed ? 'Por seguridad, se recomienda cambiar tu contraseña temporal' : null
     });
 
   } catch (error) {
@@ -234,9 +242,9 @@ export const changePassword = async (req, res) => {
     // Encriptar nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Actualizar contraseña
+    // Actualizar contraseña Y marcar como cambiada
     await connection.query(
-      'UPDATE usuarios SET password = ? WHERE id = ?',
+      'UPDATE usuarios SET password = ?, password_changed = TRUE WHERE id = ?',
       [hashedPassword, req.userId]
     );
 
