@@ -14,7 +14,16 @@ router.use('/solicitudes', solicitudesRoutes);
 // Rutas de catálogos
 router.use('/catalogos', catalogosRoutes);
 
-// Ruta de prueba
+/**
+ * @swagger
+ * /api/health:
+ *   get:
+ *     tags: [Sistema]
+ *     summary: Verificar estado del servidor
+ *     responses:
+ *       200:
+ *         description: Servidor funcionando correctamente
+ */
 router.get('/health', (req, res) => {
   res.json({
     success: true,

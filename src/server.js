@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
 import { testConnection } from './config/database.js';
+import swaggerSpec from './config/swagger.js';
 import routes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorMiddleware.js';
 
@@ -24,6 +26,12 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Swagger UI - Documentación interactiva
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'SACC5i API Documentation'
+}));
+
 // Logging de requests en desarrollo
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
@@ -41,8 +49,10 @@ app.get('/', (req, res) => {
     success: true,
     message: 'API SACC5i - Sistema de Atención a la Ciudadanía del C5i',
     version: '1.0.0',
+    documentation: `http://localhost:${PORT}/api-docs`,
     endpoints: {
       health: '/api/health',
+      swagger: '/api-docs',
       auth: {
         register: 'POST /api/auth/register',
         login: 'POST /api/auth/login',
@@ -91,11 +101,8 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log('\n🚀 Servidor SACC5i Backend iniciado');
       console.log(`📡 Puerto: ${PORT}`);
-      console.log(`🌐 URL: http://localhost:${PORT}`);
-      console.log(`🔧 Modo: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🎯 API: http://localhost:${PORT}/api`);
-      console.log(`💚 Frontend permitido: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-      console.log('\n📚 Documentación: http://localhost:' + PORT + '/\n');
+
+      console.log(`📚 Swagger: http://localhost:${PORT}/api-docs\n`);
     });
 
   } catch (error) {
@@ -106,12 +113,12 @@ const startServer = async () => {
 
 // Manejo de señales de terminación
 process.on('SIGINT', () => {
-  console.log('\n👋 Cerrando servidor...');
+  console.log('\nCerrando servidor...');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n👋 Cerrando servidor...');
+  console.log('\nCerrando servidor...');
   process.exit(0);
 });
 
