@@ -10,10 +10,10 @@ export const getUsuarios = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    const { rol, activo, region_id } = req.query;
+    const { rol, activo, region_id, buscar } = req.query;
     
     let query = `
-      SELECT u.id, u.nombre_completo, u.usuario, u.extension, u.region_id, u.rol, 
+      SELECT u.id, u.nombre, u.apellido, u.usuario, u.extension, u.region_id, u.rol, 
              u.activo, u.password_changed, u.created_at, r.nombre as region_nombre
       FROM usuarios u
       LEFT JOIN regiones r ON u.region_id = r.id
@@ -37,7 +37,13 @@ export const getUsuarios = async (req, res) => {
       params.push(region_id);
     }
 
-    query += ' ORDER BY u.rol, u.nombre_completo';
+    if (buscar) {
+      query += ' AND (u.nombre LIKE ? OR u.apellido LIKE ? OR u.usuario LIKE ? OR u.extension LIKE ?)';
+      const searchTerm = `%${buscar}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    query += ' ORDER BY u.rol, u.nombre, u.apellido';
 
     const [usuarios] = await connection.query(query, params);
 
@@ -65,7 +71,8 @@ export const createUsuario = async (req, res) => {
   
   try {
     const {
-      nombre_completo,
+      nombre,
+      apellido,
       usuario,
       extension,
       region_id,
@@ -105,9 +112,9 @@ export const createUsuario = async (req, res) => {
 
     // Insertar usuario
     const [result] = await connection.query(
-      `INSERT INTO usuarios (nombre_completo, usuario, password, extension, region_id, rol, password_changed)
-       VALUES (?, ?, ?, ?, ?, ?, FALSE)`,
-      [nombre_completo, usuario, hashedPassword, extension, region_id, rol || 'analista']
+      `INSERT INTO usuarios (nombre, apellido, usuario, password, extension, region_id, rol, password_changed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)`,
+      [nombre, apellido, usuario, hashedPassword, extension, region_id, rol || 'analista']
     );
 
     res.status(201).json({
@@ -115,7 +122,8 @@ export const createUsuario = async (req, res) => {
       message: 'Usuario creado exitosamente',
       data: {
         id: result.insertId,
-        nombre_completo,
+        nombre,
+        apellido,
         usuario,
         extension,
         region_id,
@@ -142,7 +150,7 @@ export const updateUsuario = async (req, res) => {
   
   try {
     const { id } = req.params;
-    const { nombre_completo, extension, region_id, rol } = req.body;
+    const { nombre, apellido, extension, region_id, rol } = req.body;
 
     // Verificar que el usuario existe
     const [existing] = await connection.query(
@@ -174,12 +182,13 @@ export const updateUsuario = async (req, res) => {
 
     await connection.query(
       `UPDATE usuarios 
-       SET nombre_completo = COALESCE(?, nombre_completo),
+       SET nombre = COALESCE(?, nombre),
+           apellido = COALESCE(?, apellido),
            extension = COALESCE(?, extension),
            region_id = ?,
            rol = COALESCE(?, rol)
        WHERE id = ?`,
-      [nombre_completo, extension, region_id, rol, id]
+      [nombre, apellido, extension, region_id, rol, id]
     );
 
     res.json({

@@ -26,14 +26,23 @@ const router = express.Router();
  *         schema:
  *           type: string
  *           enum: [super_admin, admin, analista]
+ *         description: Filtrar por rol
  *       - in: query
  *         name: activo
  *         schema:
  *           type: boolean
+ *         description: Filtrar por estado activo/inactivo
  *       - in: query
  *         name: region_id
  *         schema:
  *           type: integer
+ *         description: Filtrar por región
+ *       - in: query
+ *         name: buscar
+ *         schema:
+ *           type: string
+ *         description: Buscar por nombre, apellido, usuario o extensión
+ *         example: "Orlando"
  *     responses:
  *       200:
  *         description: Lista de usuarios
@@ -57,15 +66,15 @@ router.get('/usuarios', requireAdmin, getUsuarios);
  *           schema:
  *             type: object
  *             required:
- *               - username
+ *               - usuario
  *               - nombre
  *               - apellido
  *               - extension
  *               - rol
  *             properties:
- *               username:
+ *               usuario:
  *                 type: string
- *                 example: juan.perez
+ *                 example: juan_perez
  *               nombre:
  *                 type: string
  *                 example: Juan
@@ -82,6 +91,7 @@ router.get('/usuarios', requireAdmin, getUsuarios);
  *               region_id:
  *                 type: integer
  *                 example: 1
+ *                 description: Opcional - requerido solo para analistas
  *     responses:
  *       201:
  *         description: Usuario creado exitosamente
@@ -96,7 +106,8 @@ router.post('/usuarios', requireAdmin, createUsuario);
  * @swagger
  * /api/admin/usuarios/{id}:
  *   put:
- *     summary: Actualizar usuario (Admin/Super Admin)
+ *     summary: Actualizar perfil de OTRO usuario (Admin/Super Admin)
+ *     description: Este endpoint permite a Admin/Super Admin actualizar el perfil de cualquier usuario. Para actualizar TU PROPIO perfil usa /api/auth/profile
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
@@ -104,8 +115,10 @@ router.post('/usuarios', requireAdmin, createUsuario);
  *       - in: path
  *         name: id
  *         required: true
+ *         description: ID del usuario a actualizar
  *         schema:
  *           type: integer
+ *         example: 4
  *     requestBody:
  *       required: true
  *       content:
@@ -115,17 +128,28 @@ router.post('/usuarios', requireAdmin, createUsuario);
  *             properties:
  *               nombre:
  *                 type: string
+ *                 example: "Belén"
  *               apellido:
  *                 type: string
+ *                 example: "Rodríguez Marín"
  *               extension:
  *                 type: string
+ *                 example: "99999"
  *               region_id:
  *                 type: integer
+ *                 example: 2
+ *           example:
+ *             nombre: "Belén"
+ *             apellido: "Rodríguez Marín"
+ *             extension: "99999"
+ *             region_id: 2
  *     responses:
  *       200:
- *         description: Usuario actualizado
+ *         description: Usuario actualizado exitosamente
  *       404:
  *         description: Usuario no encontrado
+ *       403:
+ *         description: No autorizado (requiere rol Admin o Super Admin)
  */
 router.put('/usuarios/:id', requireAdmin, updateUsuario);
 

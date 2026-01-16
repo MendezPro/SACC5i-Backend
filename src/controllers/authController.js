@@ -11,68 +11,14 @@ const generateToken = (userId) => {
   );
 };
 
-// Registrar nuevo usuario
+// Registrar nuevo usuario - DESHABILITADO
+// Solo los administradores pueden crear usuarios desde /api/admin/usuarios
 export const register = async (req, res) => {
-  const connection = await pool.getConnection();
-  
-  try {
-    const {
-      nombre_completo,
-      usuario,
-      password,
-      fecha_nacimiento,
-      region,
-      extension
-    } = req.body;
-
-    // Verificar si el usuario ya existe
-    const [existingUser] = await connection.query(
-      'SELECT id FROM usuarios WHERE usuario = ?',
-      [usuario]
-    );
-
-    if (existingUser.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'El nombre de usuario ya está en uso'
-      });
-    }
-
-    // Encriptar contraseña
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Insertar nuevo usuario
-    const [result] = await connection.query(
-      `INSERT INTO usuarios (nombre_completo, usuario, password, fecha_nacimiento, region, extension)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [nombre_completo, usuario, hashedPassword, fecha_nacimiento, region, extension]
-    );
-
-    // Generar token
-    const token = generateToken(result.insertId);
-
-    res.status(201).json({
-      success: true,
-      message: 'Usuario registrado exitosamente',
-      data: {
-        id: result.insertId,
-        nombre_completo,
-        usuario,
-        region,
-        token
-      }
-    });
-
-  } catch (error) {
-    console.error('Error en registro:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al registrar usuario',
-      error: error.message
-    });
-  } finally {
-    connection.release();
-  }
+  res.status(403).json({
+    success: false,
+    message: 'El registro público está deshabilitado. Solo los administradores pueden crear usuarios del sistema.',
+    contacto: 'Contacte al administrador del sistema para solicitar acceso.'
+  });
 };
 
 // Login de usuario
@@ -80,15 +26,23 @@ export const login = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    const { usuario, password } = req.body;
+    const { username, password } = req.body;
+
+    console.log('🔐 Intento de login:');
+    console.log('   Username recibido:', username);
+    console.log('   Password recibido:', password ? '***' : 'undefined');
+    console.log('   Body completo:', JSON.stringify(req.body));
 
     // Buscar usuario
     const [users] = await connection.query(
       'SELECT * FROM usuarios WHERE usuario = ? AND activo = TRUE',
-      [usuario]
+      [username]
     );
 
+    console.log('   Usuarios encontrados:', users.length);
+
     if (users.length === 0) {
+      console.log('❌ Usuario no encontrado o inactivo');
       return res.status(401).json({
         success: false,
         message: 'Usuario o contraseña incorrectos'
@@ -96,16 +50,24 @@ export const login = async (req, res) => {
     }
 
     const user = users[0];
+    console.log('   Usuario DB:', user.usuario);
+    console.log('   Usuario activo:', user.activo);
+    console.log('   Rol:', user.rol);
 
     // Verificar contraseña
     const isValidPassword = await bcrypt.compare(password, user.password);
 
+    console.log('   Password válido:', isValidPassword);
+
     if (!isValidPassword) {
+      console.log('❌ Contraseña incorrecta');
       return res.status(401).json({
         success: false,
         message: 'Usuario o contraseña incorrectos'
       });
     }
+
+    console.log('✅ Login exitoso para:', user.usuario);
 
     // Generar token
     const token = generateToken(user.id);
@@ -113,16 +75,17 @@ export const login = async (req, res) => {
     res.json({
       success: true,
       message: 'Inicio de sesión exitoso',
-      data: {
+      usuario: {
         id: user.id,
-        nombre_completo: user.nombre_completo,
+        nombre: user.nombre,
+        apellido: user.apellido,
         usuario: user.usuario,
         extension: user.extension,
         region_id: user.region_id,
         rol: user.rol,
-        password_changed: user.password_changed,
-        token
+        password_changed: user.password_changed
       },
+      token,
       // Alerta si no ha cambiado la contraseña
       warning: !user.password_changed ? 'Por seguridad, se recomienda cambiar tu contraseña temporal' : null
     });
@@ -145,7 +108,8 @@ export const getProfile = async (req, res) => {
   
   try {
     const [users] = await connection.query(
-      `SELECT u.id, u.nombre_completo, u.usuario, u.extension, u.region_id, u.rol, u.password_changed,
+      `SELECT u.id, u.nombre, u.apellido, u.usuario, u.extension, 
+              u.region_id, u.rol, u.password_changed, u.activo,
               u.created_at, r.nombre as region_nombre
        FROM usuarios u
        LEFT JOIN regiones r ON u.region_id = r.id
@@ -183,13 +147,13 @@ export const updateProfile = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    const { nombre_completo, fecha_nacimiento, region, extension } = req.body;
+    const { nombre, apellido, extension } = req.body;
 
     await connection.query(
       `UPDATE usuarios 
-       SET nombre_completo = ?, fecha_nacimiento = ?, region = ?, extension = ?
+       SET nombre = ?, apellido = ?, extension = ?
        WHERE id = ?`,
-      [nombre_completo, fecha_nacimiento, region, extension, req.userId]
+      [nombre, apellido, extension, req.userId]
     );
 
     res.json({

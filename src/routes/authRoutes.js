@@ -22,26 +22,17 @@ const router = express.Router();
  * /api/auth/register:
  *   post:
  *     tags: [Autenticación]
- *     summary: Registrar nuevo usuario
+ *     summary: ❌ DESHABILITADO - Solo Admin puede crear usuarios
+ *     description: El registro público está deshabilitado. Solo los administradores pueden crear usuarios desde /api/admin/usuarios
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [nombre_completo, usuario, password]
- *             properties:
- *               nombre_completo: { type: string, example: "Yulissa Ortega" }
- *               usuario: { type: string, example: "yulissa.ortega" }
- *               password: { type: string, example: "password123" }
- *               fecha_nacimiento: { type: string, format: date, example: "1995-05-15" }
- *               region: { type: string, example: "Región III - Centro" }
- *               extension: { type: string, example: "1234" }
  *     responses:
- *       201:
- *         description: Usuario registrado exitosamente
- *       400:
- *         description: Datos inválidos o usuario existente
+ *       403:
+ *         description: Registro público deshabilitado
  */
 router.post('/register', registerValidation, validate, register);
 
@@ -57,13 +48,24 @@ router.post('/register', registerValidation, validate, register);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [usuario, password]
+ *             required: [username, password]
  *             properties:
- *               usuario: { type: string, example: "yulissa.ortega" }
- *               password: { type: string, example: "password123" }
+ *               username: { type: string, example: "orla_developer" }
+ *               password: { type: string, example: "Orlando2026!" }
+ *           examples:
+ *             superAdmin:
+ *               summary: Super Admin (Orlando)
+ *               value:
+ *                 username: "orla_developer"
+ *                 password: "Orlando2026!"
+ *             admin:
+ *               summary: Admin (Leslie)
+ *               value:
+ *                 username: "leslie_admin"
+ *                 password: "10000"
  *     responses:
  *       200:
- *         description: Login exitoso, retorna token JWT
+ *         description: Login exitoso, retorna token JWT y datos del usuario
  *       401:
  *         description: Credenciales inválidas
  */
@@ -90,7 +92,8 @@ router.get('/profile', authMiddleware, getProfile);
  * /api/auth/profile:
  *   put:
  *     tags: [Autenticación]
- *     summary: Actualizar perfil del usuario
+ *     summary: Actualizar TU PROPIO perfil
+ *     description: Actualiza el perfil del usuario autenticado (tú mismo). Para actualizar otro usuario usa /api/admin/usuarios/{id}
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -100,15 +103,18 @@ router.get('/profile', authMiddleware, getProfile);
  *           schema:
  *             type: object
  *             properties:
- *               nombre_completo: { type: string }
- *               fecha_nacimiento: { type: string, format: date }
- *               region: { type: string }
- *               extension: { type: string }
+ *               nombre: { type: string, example: "Orlando" }
+ *               apellido: { type: string, example: "Developer" }
+ *               extension: { type: string, example: "12345" }
+ *           example:
+ *             nombre: "Orlando"
+ *             apellido: "Developer"
+ *             extension: "12345"
  *     responses:
  *       200:
- *         description: Perfil actualizado
+ *         description: Perfil actualizado exitosamente
  *       401:
- *         description: No autenticado
+ *         description: No autenticado o token inválido
  */
 router.put('/profile', authMiddleware, updateProfileValidation, validate, updateProfile);
 

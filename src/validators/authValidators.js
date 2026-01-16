@@ -32,7 +32,7 @@ export const registerValidation = [
 ];
 
 export const loginValidation = [
-  body('usuario')
+  body('username')
     .trim()
     .notEmpty().withMessage('El usuario es requerido'),
   
@@ -41,19 +41,15 @@ export const loginValidation = [
 ];
 
 export const updateProfileValidation = [
-  body('nombre_completo')
+  body('nombre')
     .optional()
     .trim()
-    .isLength({ min: 3, max: 150 }).withMessage('El nombre debe tener entre 3 y 150 caracteres'),
+    .isLength({ min: 2, max: 100 }).withMessage('El nombre debe tener entre 2 y 100 caracteres'),
   
-  body('fecha_nacimiento')
-    .optional()
-    .isDate().withMessage('Fecha de nacimiento inválida'),
-  
-  body('region')
+  body('apellido')
     .optional()
     .trim()
-    .isLength({ max: 100 }).withMessage('La región no puede exceder 100 caracteres'),
+    .isLength({ min: 2, max: 100 }).withMessage('El apellido debe tener entre 2 y 100 caracteres'),
   
   body('extension')
     .optional()

@@ -154,10 +154,11 @@ const seedDatabase = async () => {
     regionesDB.forEach(r => regionMap[r.nombre] = r.id);
 
     const usuarios = [
-      // SUPER ADMINS (Desarrolladores)
+      // SUPER ADMIN PRINCIPAL (Orlando)
       {
-        nombre: 'Orlando Developer',
-        usuario: 'orlando.dev',
+        nombre: 'Orlando',
+        apellido: 'Developer',
+        usuario: 'orla_developer',
         password: await bcrypt.hash('Orlando2026!', 10),
         extension: null,
         region_id: null,
@@ -165,8 +166,9 @@ const seedDatabase = async () => {
         password_changed: true
       },
       {
-        nombre: 'Desarrollador Sistema',
-        usuario: 'dev.sistema',
+        nombre: 'Dev',
+        apellido: 'Sistema',
+        usuario: 'dev_sistema',
         password: await bcrypt.hash('DevSistema2026!', 10),
         extension: null,
         region_id: null,
@@ -174,21 +176,23 @@ const seedDatabase = async () => {
         password_changed: true
       },
       
-      // ADMIN (Gerencia C5)
+      // ADMIN (Leslie - Gerencia C5)
       {
-        nombre: 'Leslie C5',
-        usuario: 'leslie.c5',
-        password: await bcrypt.hash('LeslieC5_2026', 10),
+        nombre: 'Leslie',
+        apellido: 'C5',
+        usuario: 'leslie_admin',
+        password: await bcrypt.hash('10000', 10),
         extension: '10000',
         region_id: null,
         rol: 'admin',
-        password_changed: true
+        password_changed: false
       },
       
       // ANALISTAS (Operativos reales)
       {
-        nombre: 'Belén Rodríguez Marín',
-        usuario: 'belen.rodriguez',
+        nombre: 'Belén',
+        apellido: 'Rodríguez Marín',
+        usuario: 'belen_rodriguez',
         password: await bcrypt.hash('11020', 10),
         extension: '11020',
         region_id: regionMap['Izúcar'],
@@ -196,8 +200,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'María de Jesús Palacios Meza',
-        usuario: 'maria.palacios',
+        nombre: 'María de Jesús',
+        apellido: 'Palacios Meza',
+        usuario: 'maria_palacios',
         password: await bcrypt.hash('17025', 10),
         extension: '17025',
         region_id: regionMap['Cuapiaxtla de Madero'],
@@ -205,8 +210,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Elsa Cristina Castillo Reyes',
-        usuario: 'elsa.castillo',
+        nombre: 'Elsa Cristina',
+        apellido: 'Castillo Reyes',
+        usuario: 'elsa_castillo',
         password: await bcrypt.hash('41025', 10),
         extension: '41025',
         region_id: regionMap['Libres'],
@@ -214,8 +220,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Jose Alberto Vázquez Hernández',
-        usuario: 'jose.vazquez',
+        nombre: 'Jose Alberto',
+        apellido: 'Vázquez Hernández',
+        usuario: 'jose_vazquez',
         password: await bcrypt.hash('10029', 10),
         extension: '10029',
         region_id: regionMap['Puebla'],
@@ -223,8 +230,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Guadalupe Serrano Cortés',
-        usuario: 'guadalupe.serrano',
+        nombre: 'Guadalupe',
+        apellido: 'Serrano Cortés',
+        usuario: 'guadalupe_serrano',
         password: await bcrypt.hash('43025', 10),
         extension: '43025',
         region_id: regionMap['Tehuacán'],
@@ -232,8 +240,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Jaime Fernández Juárez',
-        usuario: 'jaime.fernandez',
+        nombre: 'Jaime',
+        apellido: 'Fernández Juárez',
+        usuario: 'jaime_fernandez',
         password: await bcrypt.hash('12025', 10),
         extension: '12025',
         region_id: regionMap['Teziutlán'],
@@ -241,8 +250,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Alejandro Domínguez Domínguez',
-        usuario: 'alejandro.dominguez',
+        nombre: 'Alejandro',
+        apellido: 'Domínguez Domínguez',
+        usuario: 'alejandro_dominguez',
         password: await bcrypt.hash('42025', 10),
         extension: '42025',
         region_id: regionMap['Zacatlán'],
@@ -250,8 +260,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Analista Huejotzingo',
-        usuario: 'analista.huejotzingo',
+        nombre: 'Analista',
+        apellido: 'Huejotzingo',
+        usuario: 'analista_huejotzingo',
         password: await bcrypt.hash('10027', 10),
         extension: '10027',
         region_id: regionMap['Huejotzingo'],
@@ -259,8 +270,9 @@ const seedDatabase = async () => {
         password_changed: false
       },
       {
-        nombre: 'Analista Palmar',
-        usuario: 'analista.palmar',
+        nombre: 'Analista',
+        apellido: 'Palmar',
+        usuario: 'analista_palmar',
         password: await bcrypt.hash('00000', 10),
         extension: '00000',
         region_id: regionMap['Palmar de Bravo'],
@@ -271,16 +283,17 @@ const seedDatabase = async () => {
 
     for (const user of usuarios) {
       await connection.query(
-        `INSERT INTO usuarios (nombre_completo, usuario, password, extension, region_id, rol, password_changed)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO usuarios (nombre, apellido, usuario, password, extension, region_id, rol, password_changed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE 
-         nombre_completo = VALUES(nombre_completo),
+         nombre = VALUES(nombre),
+         apellido = VALUES(apellido),
          password = VALUES(password),
          extension = VALUES(extension),
          region_id = VALUES(region_id),
          rol = VALUES(rol),
          password_changed = VALUES(password_changed)`,
-        [user.nombre, user.usuario, user.password, user.extension, user.region_id, user.rol, user.password_changed]
+        [user.nombre, user.apellido, user.usuario, user.password, user.extension, user.region_id, user.rol, user.password_changed]
       );
     }
     console.log(`✅ ${usuarios.length} usuarios cargados`);
