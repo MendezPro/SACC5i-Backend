@@ -125,24 +125,37 @@ router.post('/usuarios', requireAdmin, createUsuario);
  *         application/json:
  *           schema:
  *             type: object
+ *             description: Todos los campos son opcionales - solo envía los que quieres cambiar
  *             properties:
+ *               usuario:
+ *                 type: string
+ *                 example: "tomas_alva"
+ *                 description: Nombre de usuario único (username)
  *               nombre:
  *                 type: string
- *                 example: "Belén"
+ *                 example: "Tomás"
  *               apellido:
  *                 type: string
- *                 example: "Rodríguez Marín"
+ *                 example: "Alva Edison"
  *               extension:
  *                 type: string
- *                 example: "99999"
+ *                 example: "78453"
  *               region_id:
  *                 type: integer
  *                 example: 2
+ *                 description: Opcional - usar null para remover región
+ *               rol:
+ *                 type: string
+ *                 enum: [admin, analista, super_admin]
+ *                 example: analista
+ *                 description: Solo Super Admin puede cambiar roles
  *           example:
- *             nombre: "Belén"
- *             apellido: "Rodríguez Marín"
- *             extension: "99999"
- *             region_id: 2
+ *             usuario: "tomas_alva"
+ *             nombre: "Tomás"
+ *             apellido: "Alva Edison"
+ *             extension: "78453"
+ *             region_id: 1
+ *             rol: "super_admin"
  *     responses:
  *       200:
  *         description: Usuario actualizado exitosamente

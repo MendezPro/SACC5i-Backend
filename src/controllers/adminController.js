@@ -150,7 +150,7 @@ export const updateUsuario = async (req, res) => {
   
   try {
     const { id } = req.params;
-    const { nombre, apellido, extension, region_id, rol } = req.body;
+    const { usuario, nombre, apellido, extension, region_id, rol } = req.body;
 
     // Verificar que el usuario existe
     const [existing] = await connection.query(
@@ -163,6 +163,21 @@ export const updateUsuario = async (req, res) => {
         success: false,
         message: 'Usuario no encontrado'
       });
+    }
+
+    // Si se quiere cambiar el usuario, verificar que no exista otro con ese username
+    if (usuario) {
+      const [duplicate] = await connection.query(
+        'SELECT id FROM usuarios WHERE usuario = ? AND id != ?',
+        [usuario, id]
+      );
+
+      if (duplicate.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ya existe otro usuario con ese nombre de usuario'
+        });
+      }
     }
 
     // Verificar región si se proporciona
@@ -182,13 +197,14 @@ export const updateUsuario = async (req, res) => {
 
     await connection.query(
       `UPDATE usuarios 
-       SET nombre = COALESCE(?, nombre),
+       SET usuario = COALESCE(?, usuario),
+           nombre = COALESCE(?, nombre),
            apellido = COALESCE(?, apellido),
            extension = COALESCE(?, extension),
            region_id = ?,
            rol = COALESCE(?, rol)
        WHERE id = ?`,
-      [nombre, apellido, extension, region_id, rol, id]
+      [usuario, nombre, apellido, extension, region_id, rol, id]
     );
 
     res.json({
