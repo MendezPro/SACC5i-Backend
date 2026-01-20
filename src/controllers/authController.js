@@ -28,21 +28,13 @@ export const login = async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    console.log('🔐 Intento de login:');
-    console.log('   Username recibido:', username);
-    console.log('   Password recibido:', password ? '***' : 'undefined');
-    console.log('   Body completo:', JSON.stringify(req.body));
-
     // Buscar usuario
     const [users] = await connection.query(
       'SELECT * FROM usuarios WHERE usuario = ? AND activo = TRUE',
       [username]
     );
 
-    console.log('   Usuarios encontrados:', users.length);
-
     if (users.length === 0) {
-      console.log('❌ Usuario no encontrado o inactivo');
       return res.status(401).json({
         success: false,
         message: 'Usuario o contraseña incorrectos'
@@ -50,24 +42,16 @@ export const login = async (req, res) => {
     }
 
     const user = users[0];
-    console.log('   Usuario DB:', user.usuario);
-    console.log('   Usuario activo:', user.activo);
-    console.log('   Rol:', user.rol);
 
     // Verificar contraseña
     const isValidPassword = await bcrypt.compare(password, user.password);
 
-    console.log('   Password válido:', isValidPassword);
-
     if (!isValidPassword) {
-      console.log('❌ Contraseña incorrecta');
       return res.status(401).json({
         success: false,
         message: 'Usuario o contraseña incorrectos'
       });
     }
-
-    console.log('✅ Login exitoso para:', user.usuario);
 
     // Generar token
     const token = generateToken(user.id);

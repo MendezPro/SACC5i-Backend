@@ -28,6 +28,16 @@ dist-ssr
 *.suo
 *.ntvs*
 *.njsproj
+
+# Archivos de migración temporal (solo para desarrollo)
+fix*.js
+update*.js
+*-temp.js
+*-test.js
+
+# Uploads (archivos subidos por usuarios)
+uploads/*
+!uploads/.gitkeep
 *.sln
 *.sw?
 
