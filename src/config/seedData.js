@@ -19,7 +19,7 @@ const seedDatabase = async () => {
     console.log('🔄 Iniciando carga de datos reales del C5i...\n');
 
     // ============================================
-    // 1. REGIONES (9 regiones reales)
+    // 1. REGIONES (9 regiones)
     // ============================================
     console.log('📦 Cargando Regiones...');
     const regiones = [
@@ -278,22 +278,50 @@ const seedDatabase = async () => {
         region_id: regionMap['Palmar de Bravo'],
         rol: 'analista',
         password_changed: false
+      },
+      // USUARIOS C3 (VALIDADORES)
+      {
+        nombre: 'Carlos Alberto',
+        apellido: 'Ramírez Soto',
+        usuario: 'carlos_c3_validador',
+        password: await bcrypt.hash('C3Valid2026', 10),
+        extension: null,
+        region_id: null,
+        rol: 'validador_c3',
+        password_changed: false
+      },
+      {
+        nombre: 'Laura Patricia',
+        apellido: 'González Méndez',
+        usuario: 'laura_c3_validador',
+        password: await bcrypt.hash('C3Valid2026', 10),
+        extension: null,
+        region_id: null,
+        rol: 'validador_c3',
+        password_changed: false
       }
     ];
 
     for (const user of usuarios) {
       await connection.query(
-        `INSERT INTO usuarios (nombre, apellido, usuario, password, extension, region_id, rol, password_changed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE 
-         nombre = VALUES(nombre),
-         apellido = VALUES(apellido),
+        `INSERT INTO usuarios (nombre_completo, usuario, password, extension, region_id, rol, password_changed)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         nombre_completo = VALUES(nombre_completo),
          password = VALUES(password),
          extension = VALUES(extension),
          region_id = VALUES(region_id),
          rol = VALUES(rol),
          password_changed = VALUES(password_changed)`,
-        [user.nombre, user.apellido, user.usuario, user.password, user.extension, user.region_id, user.rol, user.password_changed]
+        [
+          `${user.nombre} ${user.apellido}`,
+          user.usuario,
+          user.password,
+          user.extension,
+          user.region_id,
+          user.rol,
+          user.password_changed
+        ]
       );
     }
     console.log(`✅ ${usuarios.length} usuarios cargados`);

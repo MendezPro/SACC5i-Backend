@@ -13,7 +13,7 @@ export const getUsuarios = async (req, res) => {
     const { rol, activo, region_id, buscar } = req.query;
     
     let query = `
-      SELECT u.id, u.nombre, u.apellido, u.usuario, u.extension, u.region_id, u.rol, 
+      SELECT u.id, u.nombre_completo, u.usuario, u.extension, u.region_id, u.rol, 
              u.activo, u.password_changed, u.created_at, r.nombre as region_nombre
       FROM usuarios u
       LEFT JOIN regiones r ON u.region_id = r.id
@@ -38,12 +38,12 @@ export const getUsuarios = async (req, res) => {
     }
 
     if (buscar) {
-      query += ' AND (u.nombre LIKE ? OR u.apellido LIKE ? OR u.usuario LIKE ? OR u.extension LIKE ?)';
+      query += ' AND (u.nombre_completo LIKE ? OR u.usuario LIKE ? OR u.extension LIKE ?)';
       const searchTerm = `%${buscar}%`;
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      params.push(searchTerm, searchTerm, searchTerm);
     }
 
-    query += ' ORDER BY u.rol, u.nombre, u.apellido';
+    query += ' ORDER BY u.rol, u.nombre_completo';
 
     const [usuarios] = await connection.query(query, params);
 

@@ -1,8 +1,8 @@
 import express from 'express';
 import authRoutes from './authRoutes.js';
-import solicitudesRoutes from './solicitudesRoutes.js';
 import catalogosRoutes from './catalogosRoutes.js';
 import adminRoutes from './adminRoutes.js';
+import tramitesAltaRoutes from './tramitesAltaRoutes.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -13,8 +13,8 @@ router.use('/auth', authRoutes);
 // Rutas de administración (requiere autenticación)
 router.use('/admin', authMiddleware, adminRoutes);
 
-// Rutas de solicitudes
-router.use('/solicitudes', solicitudesRoutes);
+// MÓDULO: Trámites de ALTA (estructura modular)
+router.use('/tramites/alta', tramitesAltaRoutes);
 
 // Rutas de catálogos
 router.use('/catalogos', catalogosRoutes);

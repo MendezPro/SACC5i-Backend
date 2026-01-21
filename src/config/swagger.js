@@ -45,18 +45,19 @@ const options = {
           properties: {
             id: { type: 'integer', example: 1 },
             numero_solicitud: { type: 'string', example: 'SACC5I-2026-000001' },
-            tipo_oficio_id: { type: 'integer', example: 1 },
-            municipio_id: { type: 'integer', example: 1 },
-            region: { type: 'string', example: 'Región III - Centro' },
-            proceso_movimiento: { type: 'string', example: 'Alta de cámara' },
-            termino: { type: 'string', example: '30 días' },
-            dias_horas: { type: 'string', example: '720 horas' },
-            fecha_sello_c5: { type: 'string', format: 'date', example: '2026-01-14' },
-            fecha_recibido_dt: { type: 'string', format: 'date', example: '2026-01-14' },
-            fecha_solicitud: { type: 'string', format: 'date', example: '2026-01-14' },
-            estatus_id: { type: 'integer', example: 1 },
-            observaciones: { type: 'string', example: 'Solicitud urgente' }
-          }
+            tipo_oficio_id: { type: 'integer', example: 1, description: 'ID del tipo de oficio' },
+            municipio_id: { type: 'integer', example: 1, description: 'ID del municipio' },
+            dependencia: { type: 'string', example: 'Seguridad Pública Municipal', description: 'Dependencia solicitante' },
+            proceso_movimiento: { type: 'string', example: 'ALTA', description: 'Tipo de movimiento: ALTA, BAJA, CONSULTA' },
+            termino: { type: 'string', enum: ['Ordinario', 'Extraordinario'], example: 'Ordinario', description: 'Término para cumplir el trámite' },
+            dias_horas: { type: 'string', example: '15 días', description: 'Plazo en días u horas' },
+            fecha_sello_c5: { type: 'string', format: 'date', example: '2026-01-14', description: 'Fecha de sello en C5' },
+            fecha_recibido_dt: { type: 'string', format: 'date', example: '2026-01-14', description: 'Fecha recibido en DT' },
+            fecha_solicitud: { type: 'string', format: 'date', example: '2026-01-14', description: 'Fecha de la solicitud' },
+            estatus_id: { type: 'integer', example: 1, description: 'ID del estatus actual' },
+            observaciones: { type: 'string', example: 'Solicitud urgente', description: 'Observaciones adicionales' }
+          },
+          required: ['tipo_oficio_id', 'municipio_id', 'fecha_solicitud']
         },
         Error: {
           type: 'object',
@@ -70,12 +71,12 @@ const options = {
     tags: [
       { name: 'Autenticación', description: 'Endpoints de registro y login' },
       { name: 'Admin', description: 'Gestión de usuarios (Solo Admin/Super Admin)' },
-      { name: 'Solicitudes', description: 'Gestión de solicitudes ciudadanas' },
+      { name: 'Trámites - ALTA', description: 'Módulo de trámites de ALTA (4 pasos del mockup)' },
       { name: 'Catálogos', description: 'Catálogos del sistema' },
       { name: 'Sistema', description: 'Información del sistema' }
     ]
   },
-  apis: ['./src/routes/*.js']
+  apis: ['./src/routes/*.js', '!./src/routes/*.backup', '!./src/routes/*.old']
 };
 
 export default swaggerJsdoc(options);

@@ -92,7 +92,7 @@ const initDatabase = async () => {
         password VARCHAR(255) NOT NULL,
         extension VARCHAR(20) COMMENT 'Número de extensión del analista',
         region_id INT NULL COMMENT 'Región asignada (solo para analistas)',
-        rol ENUM('super_admin', 'admin', 'analista') NOT NULL DEFAULT 'analista',
+        rol ENUM('super_admin', 'admin', 'analista', 'validador_c3') NOT NULL DEFAULT 'analista',
         activo BOOLEAN DEFAULT TRUE,
         password_changed BOOLEAN DEFAULT FALSE COMMENT 'FALSE obliga a cambiar contraseña',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -106,56 +106,69 @@ const initDatabase = async () => {
     console.log('✅ Tabla usuarios creada');
 
     // ============================================
-    // TABLA: Solicitudes (Trámites)
+    // TABLA: Trámites de ALTA (Módulo específico)
     // ============================================
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS solicitudes (
+      CREATE TABLE IF NOT EXISTS tramites_alta (
         id INT PRIMARY KEY AUTO_INCREMENT,
         numero_solicitud VARCHAR(50) UNIQUE NOT NULL,
-        usuario_id INT NOT NULL COMMENT 'Analista que procesa',
+        usuario_analista_c5_id INT NOT NULL COMMENT 'Analista C5 que crea la solicitud',
+        usuario_validador_c3_id INT NULL COMMENT 'Validador C3 que emite dictamen',
         tipo_oficio_id INT,
         municipio_id INT,
-        proceso_movimiento VARCHAR(255),
-        termino VARCHAR(100),
-        dias_horas VARCHAR(50),
-        fecha_sello_c5 DATE,
-        fecha_recibido_dt DATE,
+        dependencia VARCHAR(255) COMMENT 'Dependencia solicitante',
+        proceso_movimiento VARCHAR(255) DEFAULT 'ALTA',
+        termino ENUM('Ordinario', 'Extraordinario') DEFAULT 'Ordinario',
+        dias_horas VARCHAR(50) COMMENT 'Días u Horas para cumplir',
+        fecha_sello_c5 DATE COMMENT 'Fecha de sello en C5',
+        fecha_recibido_dt DATE COMMENT 'Fecha recibido en DT',
         fecha_solicitud DATE NOT NULL,
+        fase_actual ENUM(
+          'datos_solicitud',
+          'validacion_personal', 
+          'enviado_c3',
+          'validado_c3',
+          'filtro_competencia_c5',
+          'rechazado',
+          'finalizado'
+        ) DEFAULT 'datos_solicitud',
         estatus_id INT DEFAULT 1,
         observaciones TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+        FOREIGN KEY (usuario_analista_c5_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+        FOREIGN KEY (usuario_validador_c3_id) REFERENCES usuarios(id) ON DELETE SET NULL,
         FOREIGN KEY (tipo_oficio_id) REFERENCES tipos_oficio(id) ON DELETE SET NULL,
         FOREIGN KEY (municipio_id) REFERENCES municipios(id) ON DELETE SET NULL,
         FOREIGN KEY (estatus_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
-        INDEX idx_usuario (usuario_id),
+        INDEX idx_analista (usuario_analista_c5_id),
+        INDEX idx_validador (usuario_validador_c3_id),
+        INDEX idx_fase (fase_actual),
         INDEX idx_estatus (estatus_id),
-        INDEX idx_fecha (fecha_solicitud)
+        INDEX idx_fecha (fecha_solicitud),
+        INDEX idx_dependencia (dependencia)
       )
     `);
-    console.log('✅ Tabla solicitudes creada');
+    console.log('✅ Tabla tramites_alta creada');
 
     // ============================================
-    // TABLA: Historial de Solicitudes
+    // TABLA: Historial de Trámites ALTA
     // ============================================
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS historial_solicitudes (
+      CREATE TABLE IF NOT EXISTS historial_tramites_alta (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        solicitud_id INT NOT NULL,
+        tramite_alta_id INT NOT NULL,
         usuario_id INT NOT NULL,
-        estatus_anterior_id INT,
-        estatus_nuevo_id INT,
+        fase_anterior VARCHAR(50),
+        fase_nueva VARCHAR(50),
         comentario TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (solicitud_id) REFERENCES solicitudes(id) ON DELETE CASCADE,
+        FOREIGN KEY (tramite_alta_id) REFERENCES tramites_alta(id) ON DELETE CASCADE,
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-        FOREIGN KEY (estatus_anterior_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
-        FOREIGN KEY (estatus_nuevo_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
-        INDEX idx_solicitud (solicitud_id)
+        INDEX idx_tramite (tramite_alta_id)
       )
     `);
-    console.log('✅ Tabla historial_solicitudes creada');
+    console.log('✅ Tabla historial_tramites_alta creada');
 
     console.log('\n🎉 Estructura de base de datos creada correctamente');
     console.log('📊 Ejecuta el seeder para cargar los datos: npm run seed\n');

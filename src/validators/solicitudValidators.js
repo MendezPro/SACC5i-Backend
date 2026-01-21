@@ -6,13 +6,13 @@ export const createSolicitudValidation = [
     .isInt().withMessage('El tipo de oficio debe ser un número'),
   
   body('municipio_id')
-    .optional()
+    .notEmpty().withMessage('El municipio es requerido')
     .isInt().withMessage('El municipio debe ser un número'),
   
-  body('region')
+  body('dependencia')
     .optional()
     .trim()
-    .isLength({ max: 100 }).withMessage('La región no puede exceder 100 caracteres'),
+    .isLength({ max: 255 }).withMessage('La dependencia no puede exceder 255 caracteres'),
   
   body('proceso_movimiento')
     .optional()
@@ -21,8 +21,7 @@ export const createSolicitudValidation = [
   
   body('termino')
     .optional()
-    .trim()
-    .isLength({ max: 100 }).withMessage('El término no puede exceder 100 caracteres'),
+    .isIn(['Ordinario', 'Extraordinario']).withMessage('El término debe ser Ordinario o Extraordinario'),
   
   body('dias_horas')
     .optional()
@@ -55,10 +54,10 @@ export const updateSolicitudValidation = [
     .optional()
     .isInt().withMessage('El municipio debe ser un número'),
   
-  body('region')
+  body('dependencia')
     .optional()
     .trim()
-    .isLength({ max: 100 }).withMessage('La región no puede exceder 100 caracteres'),
+    .isLength({ max: 255 }).withMessage('La dependencia no puede exceder 255 caracteres'),
   
   body('proceso_movimiento')
     .optional()
@@ -67,8 +66,7 @@ export const updateSolicitudValidation = [
   
   body('termino')
     .optional()
-    .trim()
-    .isLength({ max: 100 }).withMessage('El término no puede exceder 100 caracteres'),
+    .isIn(['Ordinario', 'Extraordinario']).withMessage('El término debe ser Ordinario o Extraordinario'),
   
   body('dias_horas')
     .optional()

@@ -61,8 +61,7 @@ export const login = async (req, res) => {
       message: 'Inicio de sesión exitoso',
       usuario: {
         id: user.id,
-        nombre: user.nombre,
-        apellido: user.apellido,
+        nombre_completo: user.nombre_completo,
         usuario: user.usuario,
         extension: user.extension,
         region_id: user.region_id,
@@ -92,7 +91,7 @@ export const getProfile = async (req, res) => {
   
   try {
     const [users] = await connection.query(
-      `SELECT u.id, u.nombre, u.apellido, u.usuario, u.extension, 
+      `SELECT u.id, u.nombre_completo, u.usuario, u.extension, 
               u.region_id, u.rol, u.password_changed, u.activo,
               u.created_at, r.nombre as region_nombre
        FROM usuarios u
@@ -131,13 +130,13 @@ export const updateProfile = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    const { nombre, apellido, extension } = req.body;
+    const { nombre_completo, extension } = req.body;
 
     await connection.query(
       `UPDATE usuarios 
-       SET nombre = ?, apellido = ?, extension = ?
+       SET nombre_completo = ?, extension = ?
        WHERE id = ?`,
-      [nombre, apellido, extension, req.userId]
+      [nombre_completo, extension, req.userId]
     );
 
     res.json({

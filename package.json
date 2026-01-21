@@ -10,8 +10,7 @@
     "db:init": "node src/config/initDB.js",
     "seed": "node src/config/seedData.js",
     "db:drop": "node src/config/dropTables.js",
-    "db:reset": "node src/config/dropTables.js && node src/config/initDB.js && node src/config/seedData.js",
-    "db:update": "node src/config/updateDB.js"
+    "db:reset": "node src/config/dropTables.js && node src/config/initDB.js && node src/config/seedData.js"
   },
   "keywords": [
     "sacc5i",
