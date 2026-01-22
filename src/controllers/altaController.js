@@ -29,7 +29,7 @@ export const crearNuevaSolicitud = async (req, res) => {
     const {
       tipo_oficio_id,
       municipio_id,
-      dependencia,
+      dependencia_id,
       proceso_movimiento = 'ALTA',
       termino,
       dias_horas,
@@ -62,7 +62,7 @@ export const crearNuevaSolicitud = async (req, res) => {
         usuario_analista_c5_id,
         tipo_oficio_id,
         municipio_id,
-        dependencia,
+        dependencia_id,
         proceso_movimiento,
         termino,
         dias_horas,
@@ -78,7 +78,7 @@ export const crearNuevaSolicitud = async (req, res) => {
         req.userId,
         tipo_oficio_id,
         municipio_id,
-        dependencia,
+        dependencia_id,
         proceso_movimiento,
         termino,
         dias_horas,
@@ -143,12 +143,15 @@ export const obtenerMisSolicitudes = async (req, res) => {
         m.nombre as municipio_nombre,
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         uv.nombre_completo as validador_c3_nombre
       FROM tramites_alta t
       LEFT JOIN municipios m ON t.municipio_id = m.id
       LEFT JOIN regiones r ON m.region_id = r.id
       LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
       WHERE t.usuario_analista_c5_id = ?
@@ -167,8 +170,8 @@ export const obtenerMisSolicitudes = async (req, res) => {
     }
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR t.dependencia LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`);
+      query += ' AND (t.numero_solicitud LIKE ? OR dep.nombre LIKE ? OR dep.siglas LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
     }
 
     query += ' ORDER BY t.created_at DESC';
@@ -208,12 +211,15 @@ export const obtenerSolicitudPorId = async (req, res) => {
         m.nombre as municipio_nombre,
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         uv.nombre_completo as validador_c3_nombre
       FROM tramites_alta t
       LEFT JOIN municipios m ON t.municipio_id = m.id
       LEFT JOIN regiones r ON m.region_id = r.id
       LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
       WHERE t.id = ? AND t.usuario_analista_c5_id = ?`,
@@ -226,6 +232,20 @@ export const obtenerSolicitudPorId = async (req, res) => {
         message: 'Solicitud no encontrada'
       });
     }
+
+    // Obtener personas del trámite
+    const [personas] = await connection.query(
+      `SELECT 
+        p.*,
+        pu.nombre as puesto_nombre,
+        pu.es_competencia_municipal,
+        pu.motivo_no_competencia
+      FROM personas_tramite_alta p
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      WHERE p.tramite_alta_id = ?
+      ORDER BY p.created_at ASC`,
+      [id]
+    );
 
     // Obtener historial
     const [historial] = await connection.query(
@@ -243,6 +263,7 @@ export const obtenerSolicitudPorId = async (req, res) => {
       success: true,
       data: {
         ...solicitudes[0],
+        personas,
         historial
       }
     });
@@ -371,16 +392,36 @@ export const obtenerSolicitudesPendientesC3 = async (req, res) => {
         m.nombre as municipio_nombre,
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         ua.extension as analista_extension
       FROM tramites_alta t
       LEFT JOIN municipios m ON t.municipio_id = m.id
       LEFT JOIN regiones r ON m.region_id = r.id
       LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       WHERE t.fase_actual = 'enviado_c3'
       ORDER BY t.created_at ASC`
     );
+
+    // Para cada trámite, obtener sus personas
+    for (let tramite of solicitudes) {
+      const [personas] = await connection.query(
+        `SELECT 
+          p.*,
+          pu.nombre as puesto_nombre,
+          pu.es_competencia_municipal,
+          pu.motivo_no_competencia
+        FROM personas_tramite_alta p
+        LEFT JOIN puestos pu ON p.puesto_id = pu.id
+        WHERE p.tramite_alta_id = ?
+        ORDER BY p.created_at ASC`,
+        [tramite.id]
+      );
+      tramite.personas = personas;
+    }
 
     res.json({
       success: true,
@@ -471,6 +512,410 @@ export const emitirDictamenC3 = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al emitir dictamen',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Obtener historial de trámites procesados por C3
+ * Solo para validadores C3 - Ver trámites que ya fueron dictaminados
+ */
+export const obtenerHistorialC3 = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { fecha_inicio, fecha_fin, busqueda, dictamen } = req.query;
+
+    let query = `
+      SELECT 
+        t.*,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre,
+        tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        dep.siglas as dependencia_siglas,
+        ua.nombre_completo as analista_nombre,
+        ua.extension as analista_extension,
+        uv.nombre_completo as validador_c3_nombre
+      FROM tramites_alta t
+      LEFT JOIN municipios m ON t.municipio_id = m.id
+      LEFT JOIN regiones r ON m.region_id = r.id
+      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
+      LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
+      LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
+      WHERE (t.fase_actual = 'validado_c3' OR t.fase_actual = 'rechazado' OR t.fase_actual = 'rechazado_no_corresponde')
+    `;
+
+    const params = [];
+
+    // Filtrar por el validador C3 que emitió el dictamen (solo ver los propios)
+    query += ' AND t.usuario_validador_c3_id = ?';
+    params.push(req.userId);
+
+    if (fecha_inicio && fecha_fin) {
+      query += ' AND t.updated_at BETWEEN ? AND ?';
+      params.push(fecha_inicio, fecha_fin);
+    }
+
+    if (busqueda) {
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+    }
+
+    if (dictamen) {
+      query += ' AND t.fase_actual = ?';
+      params.push(dictamen);
+    }
+
+    query += ' ORDER BY t.updated_at DESC';
+
+    const [tramites] = await connection.query(query, params);
+
+    // Para cada trámite, obtener el conteo de personas
+    for (let tramite of tramites) {
+      const [personas] = await connection.query(
+        `SELECT COUNT(*) as total,
+         SUM(CASE WHEN validado = TRUE THEN 1 ELSE 0 END) as validadas,
+         SUM(CASE WHEN rechazado = TRUE THEN 1 ELSE 0 END) as rechazadas
+         FROM personas_tramite_alta
+         WHERE tramite_alta_id = ?`,
+        [tramite.id]
+      );
+      tramite.personas_stats = personas[0];
+    }
+
+    res.json({
+      success: true,
+      data: tramites,
+      total: tramites.length,
+      message: `${tramites.length} trámites procesados en historial`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener historial C3:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener historial',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+// ============================================
+// PASO 2: VALIDACIÓN DE PERSONAL
+// ============================================
+
+/**
+ * Agregar persona al trámite (PASO 2)
+ * Imagen 6 del mockup - Formulario "Validación de Personal"
+ */
+export const agregarPersona = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { tramite_id } = req.params;
+    const {
+      nombre,
+      apellido_paterno,
+      apellido_materno,
+      fecha_nacimiento,
+      numero_oficio_c3,
+      puesto_id
+    } = req.body;
+
+    // Verificar que el trámite existe y pertenece al analista
+    const [tramites] = await connection.query(
+      `SELECT * FROM tramites_alta 
+       WHERE id = ? AND usuario_analista_c5_id = ?`,
+      [tramite_id, req.userId]
+    );
+
+    if (tramites.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Trámite no encontrado o no tienes permiso'
+      });
+    }
+
+    // Verificar si el puesto es de competencia municipal
+    const [puestos] = await connection.query(
+      'SELECT * FROM puestos WHERE id = ?',
+      [puesto_id]
+    );
+
+    if (puestos.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Puesto no encontrado'
+      });
+    }
+
+    const puesto = puestos[0];
+
+    // Si NO es competencia municipal, rechazar automáticamente
+    const rechazado = !puesto.es_competencia_municipal;
+    const motivo_rechazo = rechazado ? puesto.motivo_no_competencia : null;
+
+    // Insertar persona
+    const [result] = await connection.query(
+      `INSERT INTO personas_tramite_alta (
+        tramite_alta_id,
+        nombre,
+        apellido_paterno,
+        apellido_materno,
+        fecha_nacimiento,
+        numero_oficio_c3,
+        puesto_id,
+        validado,
+        rechazado,
+        motivo_rechazo
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        tramite_id,
+        nombre,
+        apellido_paterno,
+        apellido_materno,
+        fecha_nacimiento,
+        numero_oficio_c3,
+        puesto_id,
+        false, // validado
+        rechazado,
+        motivo_rechazo
+      ]
+    );
+
+    // Si se agregó la primera persona, cambiar fase a validacion_personal
+    const [countPersonas] = await connection.query(
+      'SELECT COUNT(*) as total FROM personas_tramite_alta WHERE tramite_alta_id = ?',
+      [tramite_id]
+    );
+
+    if (countPersonas[0].total === 1 && tramites[0].fase_actual === 'datos_solicitud') {
+      await connection.query(
+        'UPDATE tramites_alta SET fase_actual = ? WHERE id = ?',
+        ['validacion_personal', tramite_id]
+      );
+
+      await connection.query(
+        `INSERT INTO historial_tramites_alta (
+          tramite_alta_id, usuario_id, fase_anterior, fase_nueva, comentario
+        ) VALUES (?, ?, ?, ?, ?)`,
+        [tramite_id, req.userId, 'datos_solicitud', 'validacion_personal', 'Inicio de validación de personal']
+      );
+    }
+
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: rechazado 
+        ? `Persona agregada y rechazada automáticamente: ${puesto.nombre} no corresponde a competencia municipal`
+        : 'Persona agregada exitosamente',
+      data: {
+        persona_id: result.insertId,
+        rechazado,
+        motivo_rechazo,
+        puesto_nombre: puesto.nombre
+      }
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al agregar persona:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al agregar persona',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Obtener personas del trámite
+ */
+export const obtenerPersonasPorTramite = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { tramite_id } = req.params;
+
+    const [personas] = await connection.query(
+      `SELECT 
+        p.*,
+        pu.nombre as puesto_nombre,
+        pu.es_competencia_municipal
+      FROM personas_tramite_alta p
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      WHERE p.tramite_alta_id = ?
+      ORDER BY p.created_at ASC`,
+      [tramite_id]
+    );
+
+    res.json({
+      success: true,
+      data: personas,
+      total: personas.length
+    });
+
+  } catch (error) {
+    console.error('Error al obtener personas:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener personas',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Validar persona (marcar como aprobada)
+ */
+export const validarPersona = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { persona_id } = req.params;
+
+    // Verificar que la persona existe y pertenece a un trámite del analista
+    const [personas] = await connection.query(
+      `SELECT p.*, t.usuario_analista_c5_id 
+       FROM personas_tramite_alta p
+       JOIN tramites_alta t ON p.tramite_alta_id = t.id
+       WHERE p.id = ?`,
+      [persona_id]
+    );
+
+    if (personas.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Persona no encontrada'
+      });
+    }
+
+    if (personas[0].usuario_analista_c5_id !== req.userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para validar esta persona'
+      });
+    }
+
+    if (personas[0].rechazado) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede validar una persona que ya fue rechazada'
+      });
+    }
+
+    // Validar persona
+    await connection.query(
+      'UPDATE personas_tramite_alta SET validado = TRUE WHERE id = ?',
+      [persona_id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: 'Persona validada exitosamente'
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al validar persona:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al validar persona',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Rechazar persona manualmente
+ */
+export const rechazarPersona = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { persona_id } = req.params;
+    const { motivo_rechazo } = req.body;
+
+    if (!motivo_rechazo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debes proporcionar un motivo de rechazo'
+      });
+    }
+
+    // Verificar que la persona existe y pertenece a un trámite del analista
+    const [personas] = await connection.query(
+      `SELECT p.*, t.usuario_analista_c5_id 
+       FROM personas_tramite_alta p
+       JOIN tramites_alta t ON p.tramite_alta_id = t.id
+       WHERE p.id = ?`,
+      [persona_id]
+    );
+
+    if (personas.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Persona no encontrada'
+      });
+    }
+
+    if (personas[0].usuario_analista_c5_id !== req.userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para rechazar esta persona'
+      });
+    }
+
+    if (personas[0].validado) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede rechazar una persona que ya fue validada'
+      });
+    }
+
+    // Rechazar persona
+    await connection.query(
+      `UPDATE personas_tramite_alta 
+       SET rechazado = TRUE, validado = FALSE, motivo_rechazo = ?
+       WHERE id = ?`,
+      [motivo_rechazo, persona_id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: 'Persona rechazada exitosamente'
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al rechazar persona:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al rechazar persona',
       error: error.message
     });
   } finally {

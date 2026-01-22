@@ -113,3 +113,58 @@ export const getEstatus = async (req, res) => {
     connection.release();
   }
 };
+
+// Obtener dependencias (28 del C5i)
+export const getDependencias = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const [dependencias] = await connection.query(
+      'SELECT * FROM dependencias ORDER BY nombre ASC'
+    );
+
+    res.json({
+      success: true,
+      data: dependencias,
+      total: dependencias.length
+    });
+
+  } catch (error) {
+    console.error('Error al obtener dependencias:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener dependencias',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+// Obtener puestos con filtro de competencia
+export const getPuestos = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const [puestos] = await connection.query(
+      'SELECT * FROM puestos ORDER BY nombre ASC'
+    );
+
+    res.json({
+      success: true,
+      data: puestos,
+      total: puestos.length,
+      message: 'Puestos con es_competencia_municipal=FALSE serán rechazados automáticamente'
+    });
+
+  } catch (error) {
+    console.error('Error al obtener puestos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener puestos',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};

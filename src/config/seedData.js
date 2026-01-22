@@ -370,13 +370,102 @@ const seedDatabase = async () => {
     }
     console.log('✅ Estatus cargados');
 
+    // ============================================
+    // 6. DEPENDENCIAS (28 dependencias del C5i)
+    // ============================================
+    console.log('🏢 Cargando dependencias...');
+    const dependencias = [
+      ['CENTRO ESTATAL DE CONTROL, COMANDO, COMUNICACIONES Y CÓMPUTO', 'CECSNSP'],
+      ['CENTROS DE REINSERCIÓN SOCIAL', 'CERESOS'],
+      ['CENTRO DE CONTROL, COMANDO, COMUNICACIONES Y CÓMPUTO', 'CGC5I'],
+      ['CUAPIAXTLA DE MADERO', 'CUAPIAXTLA'],
+      ['DIRECCIÓN GENERAL DE ASUNTOS JURÍDICOS', 'DGAJ'],
+      ['DIRECCIÓN GENERAL DE CULTURA DE LA LEGALIDAD Y USO DE LA FUERZA EFECTIVA', 'DGCUECCEP'],
+      ['DIRECCIÓN GENERAL DE PREVENCIÓN DEL DELITO Y PARTICIPACIÓN CIUDADANA', 'DGPEDI'],
+      ['DIRECCIÓN DE SERVICIOS A LA CARRERA POLICIAL', 'DSCP'],
+      ['DIRECCIÓN TÉCNICA', 'DT'],
+      ['FISCALÍA GENERAL DEL ESTADO', 'FGE'],
+      ['FISCALÍA GENERAL DE LA REPÚBLICA', 'FGR'],
+      ['HUEJOTZINGO', 'HUEJOTZINGO'],
+      ['INSTITUTO TÉCNICO DE APLICACIÓN Y PROFESIONALIZACIÓN DE LA SSP', 'ITAPUE'],
+      ['IZÚCAR DE MATAMOROS', 'IZUCAR'],
+      ['LIBRES', 'LIBRES'],
+      ['PALMAR DE BRAVO', 'PALMAR DE BRAVO'],
+      ['PODER JUDICIAL DEL ESTADO DE PUEBLA - TRIBUNAL JUSTICIA ADMINISTRATIVA', 'PJETJA'],
+      ['PODER JUDICIAL DE LA FEDERACIÓN', 'PJF'],
+      ['PUEBLA', 'PUEBLA'],
+      ['SECRETARÍA DE SEGURIDAD PÚBLICA', 'SSP'],
+      ['SECRETARÍA DE SEGURIDAD CIUDADANA - PUEBLA', 'SSC-PUEBLA'],
+      ['SECRETARÍA DE SEGURIDAD Y PROTECCIÓN CIUDADANA', 'SSPC'],
+      ['SUBPROCURADURÍA DE CONTROL PROCESAL', 'SUBCP'],
+      ['TEHUACÁN', 'TEHUACAN'],
+      ['TEZIUTLÁN', 'TEZIUTLAN'],
+      ['ZACATLÁN', 'ZACATLAN'],
+      ['PLATAFORMA DE TRANSPARENCIA', 'PLATAFORMA'],
+      ['DIRECCIÓN DE ASUNTOS JURÍDICOS', 'DAJ']
+    ];
+
+    for (const [nombre, siglas] of dependencias) {
+      await connection.query(
+        'INSERT IGNORE INTO dependencias (nombre, siglas) VALUES (?, ?)',
+        [nombre, siglas]
+      );
+    }
+    console.log(`✅ ${dependencias.length} dependencias cargadas`);
+
+    // ============================================
+    // 7. PUESTOS (Con filtro de competencia)
+    // ============================================
+    console.log('👮 Cargando puestos...');
+    const puestos = [
+      // PUESTOS DE COMPETENCIA MUNICIPAL (TRUE)
+      ['POLICÍA MUNICIPAL', true, null],
+      ['POLICÍA PREVENTIVO', true, null],
+      ['POLICÍA AUXILIAR', true, null],
+      ['POLICÍA DE TRÁNSITO', true, null],
+      ['POLICÍA DE PROXIMIDAD', true, null],
+      ['POLICÍA OPERATIVO', true, null],
+      ['POLICÍA AUXILIAR VIAL', true, null],
+      ['POLICÍA PRIMER RESPONDIENTE', true, null],
+      ['OFICIAL', true, null],
+      ['SUBOFICIAL', true, null],
+      ['CABO', true, null],
+      ['INSPECTOR', true, null],
+      ['SUBINSPECTOR', true, null],
+      ['COMANDANTE', true, null],
+      ['DIRECTOR DE SEGURIDAD PÚBLICA', true, null],
+      ['COORDINADOR OPERATIVO', true, null],
+      ['SUBDIRECTOR', true, null],
+      ['JEFE DE TURNO', true, null],
+      ['SUPERVISOR DE TURNO', true, null],
+      ['ENCARGADO DE DESPACHO', true, null],
+      
+      // PUESTOS FUERA DE COMPETENCIA MUNICIPAL (FALSE)
+      ['CUSTODIO', false, 'No corresponde a competencia Municipal. Los custodios pertenecen al sistema penitenciario estatal (CERESOS).'],
+      ['GUARDIA NACIONAL', false, 'No corresponde a competencia Municipal. La Guardia Nacional es una institución federal dependiente de la SSPC.'],
+      ['MILITAR', false, 'No corresponde a competencia Municipal. El personal militar pertenece a la SEDENA.'],
+      ['AGENTE MINISTERIAL', false, 'No corresponde a competencia Municipal. Los agentes ministeriales dependen de la Fiscalía General del Estado.'],
+      ['POLICÍA ESTATAL', false, 'No corresponde a competencia Municipal. La policía estatal depende de la SSP Estatal.'],
+      ['POLICÍA FEDERAL', false, 'No corresponde a competencia Municipal. La policía federal es una corporación de nivel federal.']
+    ];
+
+    for (const [nombre, es_competencia, motivo] of puestos) {
+      await connection.query(
+        'INSERT IGNORE INTO puestos (nombre, es_competencia_municipal, motivo_no_competencia) VALUES (?, ?, ?)',
+        [nombre, es_competencia, motivo]
+      );
+    }
+    console.log(`✅ ${puestos.length} puestos cargados`);
+
     console.log('\n🎉 ¡Carga de datos completada exitosamente!\n');
     console.log('📊 Resumen:');
     console.log(`   - 9 Regiones`);
     console.log(`   - 217 Municipios con claves oficiales`);
-    console.log(`   - ${usuarios.length} Usuarios (2 Super Admins, 1 Admin, ${usuarios.length - 3} Analistas)`);
+    console.log(`   - ${usuarios.length} Usuarios (2 Super Admins, 1 Admin, 9 Analistas, 2 Validadores C3)`);
     console.log(`   - 7 Tipos de Oficio`);
-    console.log(`   - 7 Estatus de Solicitudes\n`);
+    console.log(`   - 7 Estatus de Solicitudes`);
+    console.log(`   - ${dependencias.length} Dependencias`);
+    console.log(`   - ${puestos.length} Puestos (${puestos.filter(p => p[1]).length} municipales, ${puestos.filter(p => !p[1]).length} fuera de competencia)\n`);
 
   } catch (error) {
     console.error('❌ Error al cargar datos:', error.message);

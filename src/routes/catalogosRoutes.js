@@ -3,7 +3,9 @@ import {
   getTiposOficio,
   getMunicipios,
   getRegiones,
-  getEstatus
+  getEstatus,
+  getDependencias,
+  getPuestos
 } from '../controllers/catalogosController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 
@@ -72,5 +74,50 @@ router.get('/regiones', getRegiones);
  *         description: Lista de estatus (Pendiente, En Proceso, Aprobada, etc)
  */
 router.get('/estatus', getEstatus);
+
+/**
+ * @swagger
+ * /api/catalogos/dependencias:
+ *   get:
+ *     tags: [Catálogos]
+ *     summary: Obtener todas las dependencias del C5i
+ *     description: Catálogo de las 28 dependencias del Centro C5i
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de dependencias (CECSNSP, CERESOS, CGC5I, etc)
+ */
+router.get('/dependencias', getDependencias);
+
+/**
+ * @swagger
+ * /api/catalogos/puestos:
+ *   get:
+ *     tags: [Catálogos]
+ *     summary: Obtener todos los puestos con filtro de competencia
+ *     description: Catálogo de puestos. Los que tienen es_competencia_municipal=FALSE (CUSTODIO, GUARDIA NACIONAL, MILITAR) serán rechazados automáticamente.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de puestos con flag de competencia municipal
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: integer }
+ *                       nombre: { type: string }
+ *                       es_competencia_municipal: { type: boolean }
+ *                       motivo_no_competencia: { type: string }
+ */
+router.get('/puestos', getPuestos);
 
 export default router;

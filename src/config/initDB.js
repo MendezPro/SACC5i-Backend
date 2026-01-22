@@ -82,6 +82,35 @@ const initDatabase = async () => {
     console.log('✅ Tabla estatus_solicitudes creada');
 
     // ============================================
+    // TABLA: Dependencias (Catálogo de 28 dependencias del C5i)
+    // ============================================
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS dependencias (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        nombre VARCHAR(150) NOT NULL UNIQUE,
+        siglas VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_nombre (nombre)
+      )
+    `);
+    console.log('✅ Tabla dependencias creada');
+
+    // ============================================
+    // TABLA: Puestos (Catálogo con filtro de competencia)
+    // ============================================
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS puestos (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        nombre VARCHAR(150) NOT NULL UNIQUE,
+        es_competencia_municipal BOOLEAN DEFAULT TRUE COMMENT 'FALSE para Custodio, Guardia Nacional, Militar',
+        motivo_no_competencia TEXT COMMENT 'Razón por la cual no corresponde',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_competencia (es_competencia_municipal)
+      )
+    `);
+    console.log('✅ Tabla puestos creada');
+
+    // ============================================
     // TABLA: Usuarios (Con jerarquía real del C5i)
     // ============================================
     await connection.query(`
@@ -116,7 +145,7 @@ const initDatabase = async () => {
         usuario_validador_c3_id INT NULL COMMENT 'Validador C3 que emite dictamen',
         tipo_oficio_id INT,
         municipio_id INT,
-        dependencia VARCHAR(255) COMMENT 'Dependencia solicitante',
+        dependencia_id INT COMMENT 'Dependencia solicitante (catálogo)',
         proceso_movimiento VARCHAR(255) DEFAULT 'ALTA',
         termino ENUM('Ordinario', 'Extraordinario') DEFAULT 'Ordinario',
         dias_horas VARCHAR(50) COMMENT 'Días u Horas para cumplir',
@@ -128,7 +157,7 @@ const initDatabase = async () => {
           'validacion_personal', 
           'enviado_c3',
           'validado_c3',
-          'filtro_competencia_c5',
+          'rechazado_no_corresponde',
           'rechazado',
           'finalizado'
         ) DEFAULT 'datos_solicitud',
@@ -140,16 +169,45 @@ const initDatabase = async () => {
         FOREIGN KEY (usuario_validador_c3_id) REFERENCES usuarios(id) ON DELETE SET NULL,
         FOREIGN KEY (tipo_oficio_id) REFERENCES tipos_oficio(id) ON DELETE SET NULL,
         FOREIGN KEY (municipio_id) REFERENCES municipios(id) ON DELETE SET NULL,
+        FOREIGN KEY (dependencia_id) REFERENCES dependencias(id) ON DELETE SET NULL,
         FOREIGN KEY (estatus_id) REFERENCES estatus_solicitudes(id) ON DELETE SET NULL,
         INDEX idx_analista (usuario_analista_c5_id),
         INDEX idx_validador (usuario_validador_c3_id),
         INDEX idx_fase (fase_actual),
         INDEX idx_estatus (estatus_id),
         INDEX idx_fecha (fecha_solicitud),
-        INDEX idx_dependencia (dependencia)
+        INDEX idx_dependencia (dependencia_id)
       )
     `);
     console.log('✅ Tabla tramites_alta creada');
+
+    // ============================================
+    // TABLA: Personas en Trámite ALTA (PASO 2)
+    // ============================================
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS personas_tramite_alta (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        tramite_alta_id INT NOT NULL COMMENT 'Trámite al que pertenece',
+        nombre VARCHAR(100) NOT NULL,
+        apellido_paterno VARCHAR(100) NOT NULL,
+        apellido_materno VARCHAR(100),
+        fecha_nacimiento DATE NOT NULL,
+        numero_oficio_c3 VARCHAR(100) NOT NULL COMMENT 'Formato: CECSNSP/DGCECC/0633/2025',
+        puesto_id INT NOT NULL COMMENT 'Puesto solicitado',
+        validado BOOLEAN DEFAULT FALSE,
+        rechazado BOOLEAN DEFAULT FALSE,
+        motivo_rechazo TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (tramite_alta_id) REFERENCES tramites_alta(id) ON DELETE CASCADE,
+        FOREIGN KEY (puesto_id) REFERENCES puestos(id) ON DELETE RESTRICT,
+        INDEX idx_tramite (tramite_alta_id),
+        INDEX idx_puesto (puesto_id),
+        INDEX idx_validado (validado),
+        INDEX idx_rechazado (rechazado)
+      )
+    `);
+    console.log('✅ Tabla personas_tramite_alta creada');
 
     // ============================================
     // TABLA: Historial de Trámites ALTA
