@@ -442,6 +442,92 @@ export const obtenerSolicitudesPendientesC3 = async (req, res) => {
   }
 };
 
+/**
+ * Obtener detalle de una solicitud para C3
+ * Permite a C3 ver cualquier solicitud enviada para validación
+ */
+export const obtenerSolicitudParaC3 = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { id } = req.params;
+
+    const [solicitudes] = await connection.query(
+      `SELECT 
+        t.*,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre,
+        tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        dep.siglas as dependencia_siglas,
+        ua.nombre_completo as analista_nombre,
+        ua.extension as analista_extension,
+        uv.nombre_completo as validador_c3_nombre
+      FROM tramites_alta t
+      LEFT JOIN municipios m ON t.municipio_id = m.id
+      LEFT JOIN regiones r ON m.region_id = r.id
+      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
+      LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
+      LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
+      WHERE t.id = ? AND t.fase_actual IN ('enviado_c3', 'validado_c3', 'rechazado', 'rechazado_no_corresponde')`,
+      [id]
+    );
+
+    if (solicitudes.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Solicitud no encontrada o no disponible para C3'
+      });
+    }
+
+    // Obtener personas del trámite
+    const [personas] = await connection.query(
+      `SELECT 
+        p.*,
+        pu.nombre as puesto_nombre,
+        pu.es_competencia_municipal,
+        pu.motivo_no_competencia
+      FROM personas_tramite_alta p
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      WHERE p.tramite_alta_id = ?
+      ORDER BY p.created_at ASC`,
+      [id]
+    );
+
+    // Obtener historial
+    const [historial] = await connection.query(
+      `SELECT 
+        h.*,
+        u.nombre_completo as usuario_nombre
+      FROM historial_tramites_alta h
+      LEFT JOIN usuarios u ON h.usuario_id = u.id
+      WHERE h.tramite_alta_id = ?
+      ORDER BY h.created_at DESC`,
+      [id]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        ...solicitudes[0],
+        personas,
+        historial
+      }
+    });
+
+  } catch (error) {
+    console.error('Error al obtener solicitud para C3:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener solicitud',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
 export const emitirDictamenC3 = async (req, res) => {
   const connection = await pool.getConnection();
   

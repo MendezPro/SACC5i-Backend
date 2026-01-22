@@ -9,6 +9,7 @@ import {
   rechazarPersona,
   enviarSolicitudAC3,
   obtenerSolicitudesPendientesC3,
+  obtenerSolicitudParaC3,
   obtenerHistorialC3,
   emitirDictamenC3
 } from '../controllers/altaController.js';
@@ -177,20 +178,62 @@ router.get('/mis-solicitudes',
  *   get:
  *     tags: [Trámites - ALTA]
  *     summary: PASO 3 - Solicitudes pendientes de dictamen C3
- *     description: Vista para validadores C3 con solicitudes que esperan dictamen
+ *     description: Vista para validadores C3 con solicitudes que esperan dictamen. Incluye todas las personas agregadas a cada trámite.
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Lista de solicitudes pendientes
+ *         description: Lista de solicitudes pendientes con personas incluidas
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 success: { type: boolean }
- *                 data: { type: array }
- *                 total: { type: integer }
+ *                 success: 
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: integer, example: 2 }
+ *                       numero_solicitud: { type: string, example: "ALTA-2026-000002" }
+ *                       municipio_nombre: { type: string, example: "Santa Isabel Cholula" }
+ *                       region_nombre: { type: string, example: "Puebla" }
+ *                       tipo_oficio_nombre: { type: string, example: "Alta" }
+ *                       dependencia_nombre: { type: string, example: "CENTRO DE CONTROL, COMANDO, COMUNICACIONES Y CÓMPUTO" }
+ *                       dependencia_siglas: { type: string, example: "CGC5I" }
+ *                       analista_nombre: { type: string, example: "Belén Rodríguez Marín" }
+ *                       analista_extension: { type: string, example: "11020" }
+ *                       fase_actual: { type: string, example: "enviado_c3" }
+ *                       fecha_solicitud: { type: string, format: date-time }
+ *                       termino: { type: string, example: "Ordinario" }
+ *                       observaciones: { type: string }
+ *                       personas:
+ *                         type: array
+ *                         description: Lista de personas agregadas al trámite
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id: { type: integer }
+ *                             nombre: { type: string, example: "María" }
+ *                             apellido_paterno: { type: string, example: "Hernández" }
+ *                             apellido_materno: { type: string, example: "Martínez" }
+ *                             fecha_nacimiento: { type: string, format: date, example: "1985-03-15" }
+ *                             numero_oficio_c3: { type: string, example: "CECSNSP/DGCECC/7570/2023" }
+ *                             puesto_id: { type: integer }
+ *                             puesto_nombre: { type: string, example: "POLICIA TERCERO" }
+ *                             es_competencia_municipal: { type: boolean, example: true }
+ *                             validado: { type: boolean, example: true }
+ *                             rechazado: { type: boolean, example: false }
+ *                             motivo_rechazo: { type: string, nullable: true }
+ *                 total: 
+ *                   type: integer
+ *                   example: 1
+ *                 message:
+ *                   type: string
+ *                   example: "1 solicitudes pendientes de dictamen C3"
  *       403:
  *         description: Solo validadores C3 pueden acceder
  */
@@ -259,6 +302,83 @@ router.get('/pendientes-c3',
 router.get('/historial-c3', 
   requireRole('validador_c3'), 
   obtenerHistorialC3
+);
+
+/**
+ * @swagger
+ * /api/tramites/alta/c3/{id}:
+ *   get:
+ *     tags: [Trámites - ALTA]
+ *     summary: Ver detalle de solicitud para C3
+ *     description: Obtiene todos los detalles de una solicitud incluyendo todas las personas agregadas, historial y datos completos. Solo para validadores C3.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: 
+ *           type: integer
+ *         description: ID del trámite a consultar
+ *     responses:
+ *       200:
+ *         description: Detalles completos de la solicitud con personas e historial
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: integer }
+ *                     numero_solicitud: { type: string, example: "ALTA-2026-000002" }
+ *                     municipio_nombre: { type: string }
+ *                     region_nombre: { type: string }
+ *                     dependencia_nombre: { type: string }
+ *                     dependencia_siglas: { type: string }
+ *                     analista_nombre: { type: string }
+ *                     analista_extension: { type: string }
+ *                     fase_actual: { type: string }
+ *                     termino: { type: string }
+ *                     observaciones: { type: string }
+ *                     personas:
+ *                       type: array
+ *                       description: Todas las personas del trámite
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id: { type: integer }
+ *                           nombre: { type: string }
+ *                           apellido_paterno: { type: string }
+ *                           apellido_materno: { type: string }
+ *                           fecha_nacimiento: { type: string, format: date }
+ *                           numero_oficio_c3: { type: string }
+ *                           puesto_nombre: { type: string }
+ *                           es_competencia_municipal: { type: boolean }
+ *                           validado: { type: boolean }
+ *                           rechazado: { type: boolean }
+ *                           motivo_rechazo: { type: string }
+ *                     historial:
+ *                       type: array
+ *                       description: Historial de cambios del trámite
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           fase_anterior: { type: string }
+ *                           fase_nueva: { type: string }
+ *                           comentario: { type: string }
+ *                           usuario_nombre: { type: string }
+ *                           created_at: { type: string, format: date-time }
+ *       403:
+ *         description: Solo validadores C3 pueden acceder
+ *       404:
+ *         description: Solicitud no encontrada o no disponible para C3
+ */
+router.get('/c3/:id', 
+  requireRole('validador_c3'), 
+  obtenerSolicitudParaC3
 );
 
 /**
