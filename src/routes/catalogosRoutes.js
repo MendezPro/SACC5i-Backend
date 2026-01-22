@@ -11,7 +11,7 @@ import { authMiddleware } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación 
 router.use(authMiddleware);
 
 /**

@@ -88,7 +88,6 @@ const initDatabase = async () => {
       CREATE TABLE IF NOT EXISTS dependencias (
         id INT PRIMARY KEY AUTO_INCREMENT,
         nombre VARCHAR(150) NOT NULL UNIQUE,
-        siglas VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_nombre (nombre)
       )

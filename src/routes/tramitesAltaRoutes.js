@@ -11,7 +11,8 @@ import {
   obtenerSolicitudesPendientesC3,
   obtenerSolicitudParaC3,
   obtenerHistorialC3,
-  emitirDictamenC3
+  emitirDictamenC3,
+  obtenerTramitesRechazados
 } from '../controllers/altaController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireRole } from '../middlewares/roleMiddleware.js';
@@ -203,7 +204,7 @@ router.get('/mis-solicitudes',
  *                       region_nombre: { type: string, example: "Puebla" }
  *                       tipo_oficio_nombre: { type: string, example: "Alta" }
  *                       dependencia_nombre: { type: string, example: "CENTRO DE CONTROL, COMANDO, COMUNICACIONES Y CÓMPUTO" }
- *                       dependencia_siglas: { type: string, example: "CGC5I" }
+
  *                       analista_nombre: { type: string, example: "Belén Rodríguez Marín" }
  *                       analista_extension: { type: string, example: "11020" }
  *                       fase_actual: { type: string, example: "enviado_c3" }
@@ -337,7 +338,7 @@ router.get('/historial-c3',
  *                     municipio_nombre: { type: string }
  *                     region_nombre: { type: string }
  *                     dependencia_nombre: { type: string }
- *                     dependencia_siglas: { type: string }
+
  *                     analista_nombre: { type: string }
  *                     analista_extension: { type: string }
  *                     fase_actual: { type: string }
@@ -658,6 +659,100 @@ router.post('/dictamen-c3',
   ],
   validate,
   emitirDictamenC3
+);
+
+// ============================================
+// TABLA DE RECHAZADOS (Solo C5)
+// ============================================
+
+/**
+ * @swagger
+ * /api/tramites/alta/rechazados:
+ *   get:
+ *     summary: Obtener tabla de trámites rechazados (Solo C5)
+ *     tags: [Tramites Alta - C5]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: fecha_inicio
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filtrar desde esta fecha
+ *       - in: query
+ *         name: fecha_fin
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filtrar hasta esta fecha
+ *       - in: query
+ *         name: busqueda
+ *         schema:
+ *           type: string
+ *         description: Búsqueda por número de solicitud, municipio o dependencia
+ *       - in: query
+ *         name: fase_rechazo
+ *         schema:
+ *           type: string
+ *           enum: [rechazado, rechazado_no_corresponde]
+ *         description: Filtrar por tipo de rechazo
+ *     responses:
+ *       200:
+ *         description: Lista de trámites rechazados
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 15
+ *                       numero_solicitud:
+ *                         type: string
+ *                         example: "ALTA-2025-000015"
+ *                       fase_actual:
+ *                         type: string
+ *                         example: "rechazado_no_corresponde"
+ *                       etapa_rechazo:
+ *                         type: string
+ *                         example: "Validación de Personal (Filtro de Competencia)"
+ *                       motivo_rechazo_general:
+ *                         type: string
+ *                         example: "Puesto(s) fuera de competencia municipal: CUSTODIO"
+ *                       fecha_rechazo:
+ *                         type: string
+ *                         format: date-time
+ *                       municipio_nombre:
+ *                         type: string
+ *                         example: "Tuxtla Gutiérrez"
+ *                       dependencia_nombre:
+ *                         type: string
+ *                         example: "CENTROS DE REINSERCIÓN SOCIAL"
+ *                       personas:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                 total:
+ *                   type: integer
+ *                   example: 5
+ *                 message:
+ *                   type: string
+ *                   example: "5 trámites rechazados encontrados"
+ *       403:
+ *         description: Solo analistas C5
+ */
+router.get('/rechazados',
+  requireRole('analista'),
+  obtenerTramitesRechazados
 );
 
 export default router;

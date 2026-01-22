@@ -144,7 +144,6 @@ export const obtenerMisSolicitudes = async (req, res) => {
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         uv.nombre_completo as validador_c3_nombre
       FROM tramites_alta t
@@ -170,8 +169,8 @@ export const obtenerMisSolicitudes = async (req, res) => {
     }
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR dep.nombre LIKE ? OR dep.siglas LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+      query += ' AND (t.numero_solicitud LIKE ? OR dep.nombre LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`);
     }
 
     query += ' ORDER BY t.created_at DESC';
@@ -212,7 +211,6 @@ export const obtenerSolicitudPorId = async (req, res) => {
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         uv.nombre_completo as validador_c3_nombre
       FROM tramites_alta t
@@ -393,7 +391,6 @@ export const obtenerSolicitudesPendientesC3 = async (req, res) => {
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         ua.extension as analista_extension
       FROM tramites_alta t
@@ -459,7 +456,6 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         ua.extension as analista_extension,
         uv.nombre_completo as validador_c3_nombre
@@ -622,7 +618,6 @@ export const obtenerHistorialC3 = async (req, res) => {
         r.nombre as region_nombre,
         tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        dep.siglas as dependencia_siglas,
         ua.nombre_completo as analista_nombre,
         ua.extension as analista_extension,
         uv.nombre_completo as validador_c3_nombre
@@ -1002,6 +997,126 @@ export const rechazarPersona = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al rechazar persona',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+// ============================================
+// TABLA DE RECHAZADOS (Solo C5)
+// ============================================
+
+/**
+ * Obtener todos los trámites rechazados
+ * Vista general de rechazados para analistas C5
+ * Incluye trámites rechazados en cualquier etapa del proceso
+ */
+export const obtenerTramitesRechazados = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { fecha_inicio, fecha_fin, busqueda, fase_rechazo } = req.query;
+
+    let query = `
+      SELECT 
+        t.*,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre,
+        tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        ua.nombre_completo as analista_nombre,
+        uv.nombre_completo as validador_c3_nombre
+      FROM tramites_alta t
+      LEFT JOIN municipios m ON t.municipio_id = m.id
+      LEFT JOIN regiones r ON m.region_id = r.id
+      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
+      LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
+      LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
+      WHERE (t.fase_actual = 'rechazado' OR t.fase_actual = 'rechazado_no_corresponde')
+    `;
+
+    const params = [];
+
+    if (fecha_inicio && fecha_fin) {
+      query += ' AND t.updated_at BETWEEN ? AND ?';
+      params.push(fecha_inicio, fecha_fin);
+    }
+
+    if (busqueda) {
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+    }
+
+    if (fase_rechazo) {
+      query += ' AND t.fase_actual = ?';
+      params.push(fase_rechazo);
+    }
+
+    query += ' ORDER BY t.updated_at DESC';
+
+    const [tramites] = await connection.query(query, params);
+
+    // Para cada trámite, obtener personas y detectar si fue por competencia
+    for (let tramite of tramites) {
+      const [personas] = await connection.query(
+        `SELECT 
+          p.*,
+          pu.nombre as puesto_nombre,
+          pu.es_competencia_municipal,
+          pu.motivo_no_competencia
+        FROM personas_tramite_alta p
+        LEFT JOIN puestos pu ON p.puesto_id = pu.id
+        WHERE p.tramite_alta_id = ?
+        ORDER BY p.created_at ASC`,
+        [tramite.id]
+      );
+
+      // Detectar motivo de rechazo según la fase
+      let motivo_rechazo_general = '';
+      let etapa_rechazo = '';
+
+      if (tramite.fase_actual === 'rechazado_no_corresponde') {
+        etapa_rechazo = 'Validación de Personal (Filtro de Competencia)';
+        const personasNoCompetencia = personas.filter(p => !p.es_competencia_municipal);
+        if (personasNoCompetencia.length > 0) {
+          motivo_rechazo_general = `Puesto(s) fuera de competencia municipal: ${personasNoCompetencia.map(p => p.puesto_nombre).join(', ')}`;
+        }
+      } else if (tramite.fase_actual === 'rechazado') {
+        etapa_rechazo = 'Dictamen C3';
+        motivo_rechazo_general = tramite.observaciones || 'Rechazado por C3';
+      }
+
+      // Obtener historial para ver en qué momento fue rechazado
+      const [historial] = await connection.query(
+        `SELECT comentario, created_at 
+         FROM historial_tramites_alta 
+         WHERE tramite_alta_id = ? AND fase_nueva IN ('rechazado', 'rechazado_no_corresponde')
+         ORDER BY created_at DESC LIMIT 1`,
+        [tramite.id]
+      );
+
+      tramite.personas = personas;
+      tramite.etapa_rechazo = etapa_rechazo;
+      tramite.motivo_rechazo_general = motivo_rechazo_general;
+      tramite.fecha_rechazo = historial[0]?.created_at || tramite.updated_at;
+      tramite.comentario_rechazo = historial[0]?.comentario || '';
+    }
+
+    res.json({
+      success: true,
+      data: tramites,
+      total: tramites.length,
+      message: `${tramites.length} trámites rechazados encontrados`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener trámites rechazados:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener trámites rechazados',
       error: error.message
     });
   } finally {
