@@ -37,6 +37,17 @@ npm run dev
 
 El servidor estará disponible en: http://localhost:5000
 
+### 🔄 Migraciones (Para bases de datos existentes)
+
+Si ya tienes una base de datos creada y necesitas aplicar cambios posteriores:
+
+```bash
+# Ejecutar migración de propuestas C3
+node src/config/migrations/migracion_propuestas_c3.js
+```
+
+**Nota:** Las migraciones se ejecutan automáticamente si usas `npm run db:init` en una instalación nueva.
+
 ## Endpoints API
 
 ### Autenticación

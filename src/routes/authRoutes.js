@@ -63,6 +63,16 @@ router.post('/register', registerValidation, validate, register);
  *               value:
  *                 username: "leslie_admin"
  *                 password: "10000"
+ *             validadorC3:
+ *               summary: Validador C3 (Carlos)
+ *               value:
+ *                 username: "carlos_c3_validador"
+ *                 password: "C3Valid2026"
+ *             analistaC5:
+ *               summary: Analista C5 (Belén)
+ *               value:
+ *                 username: "belen_rodriguez"
+ *                 password: "11020"
  *     responses:
  *       200:
  *         description: Login exitoso, retorna token JWT y datos del usuario

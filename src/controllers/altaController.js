@@ -530,7 +530,7 @@ export const emitirDictamenC3 = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { tramite_id, dictamen, observaciones_c3 } = req.body;
+    const { tramite_id, dictamen, observaciones_c3, propuestas_cambio_puesto } = req.body;
 
     // Verificar que el trámite existe y está en fase enviado_c3
     const [tramites] = await connection.query(
@@ -545,8 +545,32 @@ export const emitirDictamenC3 = async (req, res) => {
       });
     }
 
+    // Si hay propuestas de cambio de puesto, procesarlas
+    let tienePropuestas = false;
+    if (propuestas_cambio_puesto && Array.isArray(propuestas_cambio_puesto) && propuestas_cambio_puesto.length > 0) {
+      for (const propuesta of propuestas_cambio_puesto) {
+        const { persona_id, puesto_propuesto_id } = propuesta;
+        
+        if (persona_id && puesto_propuesto_id) {
+          // Actualizar persona con propuesta de cambio
+          await connection.query(
+            `UPDATE personas_tramite_alta 
+             SET puesto_propuesto_c3_id = ?,
+                 tiene_propuesta_cambio = TRUE,
+                 decision_final_c5 = 'pendiente'
+             WHERE id = ? AND tramite_alta_id = ?`,
+            [puesto_propuesto_id, persona_id, tramite_id]
+          );
+          tienePropuestas = true;
+        }
+      }
+    }
+
     let nuevaFase;
-    if (dictamen === 'ALTA OK' || dictamen === 'APROBADO') {
+    if (tienePropuestas) {
+      // Si hay propuestas, enviar a revisión de C5
+      nuevaFase = 'revision_propuesta_c3';
+    } else if (dictamen === 'ALTA OK' || dictamen === 'APROBADO') {
       nuevaFase = 'validado_c3';
     } else if (dictamen === 'NO PUEDE SER DADO DE ALTA' || dictamen === 'RECHAZADO') {
       nuevaFase = 'rechazado';
@@ -565,6 +589,10 @@ export const emitirDictamenC3 = async (req, res) => {
     );
 
     // Registrar en historial
+    const comentarioHistorial = tienePropuestas 
+      ? `Dictamen C3: ${dictamen} - CON PROPUESTAS DE CAMBIO DE PUESTO` 
+      : `Dictamen C3: ${dictamen}`;
+
     await connection.query(
       `INSERT INTO historial_tramites_alta (
         tramite_alta_id, 
@@ -573,18 +601,21 @@ export const emitirDictamenC3 = async (req, res) => {
         fase_nueva, 
         comentario
       ) VALUES (?, ?, 'enviado_c3', ?, ?)`,
-      [tramite_id, req.userId, nuevaFase, `Dictamen C3: ${dictamen}`]
+      [tramite_id, req.userId, nuevaFase, comentarioHistorial]
     );
 
     await connection.commit();
 
     res.json({
       success: true,
-      message: 'Dictamen C3 registrado exitosamente',
+      message: tienePropuestas 
+        ? 'Dictamen C3 registrado con propuestas de cambio de puesto. Enviado a revisión de C5'
+        : 'Dictamen C3 registrado exitosamente',
       data: {
         tramite_id,
         dictamen,
-        fase_nueva: nuevaFase
+        fase_nueva: nuevaFase,
+        tiene_propuestas: tienePropuestas
       }
     });
 
@@ -834,9 +865,12 @@ export const obtenerPersonasPorTramite = async (req, res) => {
       `SELECT 
         p.*,
         pu.nombre as puesto_nombre,
-        pu.es_competencia_municipal
+        pu.es_competencia_municipal,
+        pu_propuesto.nombre as puesto_propuesto_nombre,
+        pu_propuesto.es_competencia_municipal as puesto_propuesto_es_municipal
       FROM personas_tramite_alta p
       LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      LEFT JOIN puestos pu_propuesto ON p.puesto_propuesto_c3_id = pu_propuesto.id
       WHERE p.tramite_alta_id = ?
       ORDER BY p.created_at ASC`,
       [tramite_id]
@@ -1117,6 +1151,250 @@ export const obtenerTramitesRechazados = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al obtener trámites rechazados',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+// ============================================
+// REVISIÓN DE PROPUESTAS C3 (Solo C5)
+// ============================================
+
+/**
+ * Obtener trámites con propuestas de cambio de puesto de C3
+ * Vista para que C5 revise y emita decisión final
+ */
+export const obtenerPropuestasC3 = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { busqueda } = req.query;
+
+    let query = `
+      SELECT 
+        t.*,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre,
+        tipo_ofi.nombre as tipo_oficio_nombre,
+        dep.nombre as dependencia_nombre,
+        ua.nombre_completo as analista_nombre,
+        uv.nombre_completo as validador_c3_nombre
+      FROM tramites_alta t
+      LEFT JOIN municipios m ON t.municipio_id = m.id
+      LEFT JOIN regiones r ON m.region_id = r.id
+      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
+      LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
+      LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
+      WHERE t.fase_actual = 'revision_propuesta_c3'
+        AND t.usuario_analista_c5_id = ?
+    `;
+
+    const params = [req.userId];
+
+    if (busqueda) {
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+    }
+
+    query += ' ORDER BY t.updated_at DESC';
+
+    const [tramites] = await connection.query(query, params);
+
+    // Para cada trámite, obtener personas con propuestas
+    for (let tramite of tramites) {
+      const [personas] = await connection.query(
+        `SELECT 
+          p.*,
+          pu_original.nombre as puesto_original_nombre,
+          pu_propuesto.nombre as puesto_propuesto_nombre,
+          pu_original.es_competencia_municipal as puesto_original_es_municipal,
+          pu_propuesto.es_competencia_municipal as puesto_propuesto_es_municipal
+        FROM personas_tramite_alta p
+        LEFT JOIN puestos pu_original ON p.puesto_id = pu_original.id
+        LEFT JOIN puestos pu_propuesto ON p.puesto_propuesto_c3_id = pu_propuesto.id
+        WHERE p.tramite_alta_id = ?
+        ORDER BY p.created_at ASC`,
+        [tramite.id]
+      );
+
+      tramite.personas = personas;
+      tramite.total_propuestas = personas.filter(p => p.tiene_propuesta_cambio).length;
+    }
+
+    res.json({
+      success: true,
+      data: tramites,
+      total: tramites.length,
+      message: `${tramites.length} trámites con propuestas de C3 encontrados`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener propuestas C3:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener propuestas C3',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Emitir decisión final de C5 sobre propuestas de C3
+ * C5 decide si acepta el puesto original o el propuesto por C3
+ */
+export const emitirDecisionFinalC5 = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { tramite_id, decisiones } = req.body;
+
+    // decisiones = [{ persona_id: 1, decision: 'original' o 'propuesta' }, ...]
+
+    if (!decisiones || !Array.isArray(decisiones) || decisiones.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Debe proporcionar al menos una decisión'
+      });
+    }
+
+    // Verificar que el trámite existe y está en revisión_propuesta_c3
+    const [tramites] = await connection.query(
+      'SELECT * FROM tramites_alta WHERE id = ? AND fase_actual = ? AND usuario_analista_c5_id = ?',
+      [tramite_id, 'revision_propuesta_c3', req.userId]
+    );
+
+    if (tramites.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Trámite no encontrado o no está en revisión de propuestas'
+      });
+    }
+
+    let todasDecisionesTomadas = true;
+
+    // Procesar cada decisión
+    for (const decision of decisiones) {
+      const { persona_id, decision: tipo_decision } = decision;
+
+      if (!['original', 'propuesta'].includes(tipo_decision)) {
+        return res.status(400).json({
+          success: false,
+          message: `Decisión inválida: ${tipo_decision}. Debe ser 'original' o 'propuesta'`
+        });
+      }
+
+      // Obtener datos de la persona
+      const [personas] = await connection.query(
+        'SELECT * FROM personas_tramite_alta WHERE id = ? AND tramite_alta_id = ?',
+        [persona_id, tramite_id]
+      );
+
+      if (personas.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `Persona con ID ${persona_id} no encontrada en este trámite`
+        });
+      }
+
+      const persona = personas[0];
+
+      if (tipo_decision === 'propuesta') {
+        // C5 acepta la propuesta de C3: cambiar puesto_id al propuesto
+        if (!persona.puesto_propuesto_c3_id) {
+          return res.status(400).json({
+            success: false,
+            message: `La persona ${persona_id} no tiene propuesta de cambio de puesto`
+          });
+        }
+
+        await connection.query(
+          `UPDATE personas_tramite_alta 
+           SET puesto_id = puesto_propuesto_c3_id,
+               decision_final_c5 = 'propuesta'
+           WHERE id = ?`,
+          [persona_id]
+        );
+
+      } else {
+        // C5 mantiene el puesto original: solo marcar decisión
+        await connection.query(
+          `UPDATE personas_tramite_alta 
+           SET decision_final_c5 = 'original'
+           WHERE id = ?`,
+          [persona_id]
+        );
+      }
+    }
+
+    // Verificar si todas las personas con propuestas tienen decisión
+    const [personasPendientes] = await connection.query(
+      `SELECT COUNT(*) as count 
+       FROM personas_tramite_alta 
+       WHERE tramite_alta_id = ? 
+         AND tiene_propuesta_cambio = TRUE 
+         AND decision_final_c5 = 'pendiente'`,
+      [tramite_id]
+    );
+
+    if (personasPendientes[0].count > 0) {
+      todasDecisionesTomadas = false;
+    }
+
+    // Si todas las decisiones están tomadas, cambiar fase del trámite
+    let nuevaFase = 'revision_propuesta_c3'; // Mantener en revisión si faltan decisiones
+    let mensaje = 'Decisiones parciales registradas. Aún quedan personas por decidir.';
+
+    if (todasDecisionesTomadas) {
+      nuevaFase = 'validado_c3'; // Continuar el proceso
+      mensaje = 'Todas las decisiones registradas. Trámite aprobado con decisión final de C5.';
+
+      // Actualizar fase del trámite
+      await connection.query(
+        `UPDATE tramites_alta 
+         SET fase_actual = ?
+         WHERE id = ?`,
+        [nuevaFase, tramite_id]
+      );
+
+      // Registrar en historial
+      await connection.query(
+        `INSERT INTO historial_tramites_alta (
+          tramite_alta_id, 
+          usuario_id, 
+          fase_anterior, 
+          fase_nueva, 
+          comentario
+        ) VALUES (?, ?, 'revision_propuesta_c3', ?, ?)`,
+        [tramite_id, req.userId, nuevaFase, 'C5 emitió decisión final sobre propuestas de C3']
+      );
+    }
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: mensaje,
+      data: {
+        tramite_id,
+        decisiones_procesadas: decisiones.length,
+        fase_nueva: nuevaFase,
+        todas_decisiones_tomadas: todasDecisionesTomadas
+      }
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al emitir decisión final C5:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al emitir decisión final',
       error: error.message
     });
   } finally {

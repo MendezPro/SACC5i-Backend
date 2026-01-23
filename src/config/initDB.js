@@ -153,9 +153,10 @@ const initDatabase = async () => {
         fecha_solicitud DATE NOT NULL,
         fase_actual ENUM(
           'datos_solicitud',
-          'validacion_personal', 
+          'validacion_personal',
           'enviado_c3',
           'validado_c3',
+          'revision_propuesta_c3',
           'rechazado_no_corresponde',
           'rechazado',
           'finalizado'
@@ -192,7 +193,10 @@ const initDatabase = async () => {
         apellido_materno VARCHAR(100),
         fecha_nacimiento DATE NOT NULL,
         numero_oficio_c3 VARCHAR(100) NOT NULL COMMENT 'Formato: CECSNSP/DGCECC/0633/2025',
-        puesto_id INT NOT NULL COMMENT 'Puesto solicitado',
+        puesto_id INT NOT NULL COMMENT 'Puesto solicitado originalmente por C5',
+        puesto_propuesto_c3_id INT NULL COMMENT 'Puesto propuesto por C3 (opcional)',
+        tiene_propuesta_cambio BOOLEAN DEFAULT FALSE COMMENT 'Indica si C3 propuso cambio',
+        decision_final_c5 ENUM('original', 'propuesta', 'pendiente') DEFAULT 'pendiente' COMMENT 'Decisión de C5 sobre propuesta',
         validado BOOLEAN DEFAULT FALSE,
         rechazado BOOLEAN DEFAULT FALSE,
         motivo_rechazo TEXT,
@@ -200,10 +204,12 @@ const initDatabase = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (tramite_alta_id) REFERENCES tramites_alta(id) ON DELETE CASCADE,
         FOREIGN KEY (puesto_id) REFERENCES puestos(id) ON DELETE RESTRICT,
+        FOREIGN KEY (puesto_propuesto_c3_id) REFERENCES puestos(id) ON DELETE RESTRICT,
         INDEX idx_tramite (tramite_alta_id),
         INDEX idx_puesto (puesto_id),
         INDEX idx_validado (validado),
-        INDEX idx_rechazado (rechazado)
+        INDEX idx_rechazado (rechazado),
+        INDEX idx_propuesta (tiene_propuesta_cambio)
       )
     `);
     console.log('✅ Tabla personas_tramite_alta creada');

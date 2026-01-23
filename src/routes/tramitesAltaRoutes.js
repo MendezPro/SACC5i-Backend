@@ -12,7 +12,9 @@ import {
   obtenerSolicitudParaC3,
   obtenerHistorialC3,
   emitirDictamenC3,
-  obtenerTramitesRechazados
+  obtenerTramitesRechazados,
+  obtenerPropuestasC3,
+  emitirDecisionFinalC5
 } from '../controllers/altaController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireRole } from '../middlewares/roleMiddleware.js';
@@ -631,10 +633,41 @@ router.post('/enviar-a-c3',
  *               dictamen:
  *                 type: string
  *                 enum: [ALTA OK, NO PUEDE SER DADO DE ALTA, APROBADO, RECHAZADO]
- *                 example: "ALTA OK"
+ *                 example: "APROBADO"
  *               observaciones_c3:
  *                 type: string
  *                 example: "Cumple con todos los requisitos"
+ *               propuestas_cambio_puesto:
+ *                 type: array
+ *                 description: "(Opcional) Array de propuestas de cambio de puesto"
+ *                 items:
+ *                   type: object
+ *                   required: [persona_id, puesto_propuesto_id]
+ *                   properties:
+ *                     persona_id:
+ *                       type: integer
+ *                       example: 15
+ *                     puesto_propuesto_id:
+ *                       type: integer
+ *                       example: 8
+ *           examples:
+ *             sinPropuesta:
+ *               summary: Dictamen sin propuestas
+ *               value:
+ *                 tramite_id: 7
+ *                 dictamen: "APROBADO"
+ *                 observaciones_c3: "Cumple con todos los requisitos"
+ *             conPropuesta:
+ *               summary: Dictamen con propuesta de cambio
+ *               value:
+ *                 tramite_id: 7
+ *                 dictamen: "APROBADO"
+ *                 observaciones_c3: "Se sugiere cambio de puesto para Elemento 1"
+ *                 propuestas_cambio_puesto:
+ *                   - persona_id: 15
+ *                     puesto_propuesto_id: 8
+ *                   - persona_id: 16
+ *                     puesto_propuesto_id: 12
  *     responses:
  *       200:
  *         description: Dictamen registrado
@@ -753,6 +786,163 @@ router.post('/dictamen-c3',
 router.get('/rechazados',
   requireRole('analista'),
   obtenerTramitesRechazados
+);
+
+// ============================================
+// REVISIÓN DE PROPUESTAS C3 (Solo C5)
+// ============================================
+
+/**
+ * @swagger
+ * /api/tramites/alta/propuestas-c3:
+ *   get:
+ *     summary: Obtener trámites con propuestas de cambio de puesto de C3 (Solo C5)
+ *     tags: [Tramites Alta - C5]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: busqueda
+ *         schema:
+ *           type: string
+ *         description: Búsqueda por número de solicitud, municipio o dependencia
+ *     responses:
+ *       200:
+ *         description: Lista de trámites con propuestas de C3
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       numero_solicitud:
+ *                         type: string
+ *                       fase_actual:
+ *                         type: string
+ *                         example: "revision_propuesta_c3"
+ *                       municipio_nombre:
+ *                         type: string
+ *                       dependencia_nombre:
+ *                         type: string
+ *                       validador_c3_nombre:
+ *                         type: string
+ *                       total_propuestas:
+ *                         type: integer
+ *                         description: Cantidad de personas con propuesta de cambio
+ *                       personas:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                             nombre:
+ *                               type: string
+ *                             puesto_original_nombre:
+ *                               type: string
+ *                             puesto_propuesto_nombre:
+ *                               type: string
+ *                             tiene_propuesta_cambio:
+ *                               type: boolean
+ *                             decision_final_c5:
+ *                               type: string
+ *                               enum: [original, propuesta, pendiente]
+ *                 total:
+ *                   type: integer
+ *                 message:
+ *                   type: string
+ *       403:
+ *         description: Solo analistas C5
+ */
+router.get('/propuestas-c3',
+  requireRole('analista'),
+  obtenerPropuestasC3
+);
+
+/**
+ * @swagger
+ * /api/tramites/alta/decision-final-c5:
+ *   post:
+ *     summary: Emitir decisión final de C5 sobre propuestas de C3 (Solo C5)
+ *     tags: [Tramites Alta - C5]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - tramite_id
+ *               - decisiones
+ *             properties:
+ *               tramite_id:
+ *                 type: integer
+ *                 example: 15
+ *               decisiones:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     persona_id:
+ *                       type: integer
+ *                       example: 42
+ *                     decision:
+ *                       type: string
+ *                       enum: [original, propuesta]
+ *                       example: "propuesta"
+ *                       description: "original = mantener puesto original, propuesta = aceptar puesto propuesto por C3"
+ *     responses:
+ *       200:
+ *         description: Decisión final registrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Todas las decisiones registradas. Trámite aprobado con decisión final de C5."
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     tramite_id:
+ *                       type: integer
+ *                     decisiones_procesadas:
+ *                       type: integer
+ *                     fase_nueva:
+ *                       type: string
+ *                     todas_decisiones_tomadas:
+ *                       type: boolean
+ *       400:
+ *         description: Error en validación
+ *       403:
+ *         description: Solo analistas C5
+ */
+router.post('/decision-final-c5',
+  requireRole('analista'),
+  [
+    body('tramite_id')
+      .notEmpty().withMessage('El ID del trámite es requerido')
+      .isInt().withMessage('El ID debe ser un número'),
+    body('decisiones')
+      .isArray({ min: 1 }).withMessage('Debe proporcionar al menos una decisión')
+  ],
+  validate,
+  emitirDecisionFinalC5
 );
 
 export default router;
