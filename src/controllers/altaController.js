@@ -204,6 +204,26 @@ export const obtenerSolicitudPorId = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Obtener información del usuario actual
+    const [usuario] = await connection.query(
+      'SELECT rol FROM usuarios WHERE id = ?',
+      [req.userId]
+    );
+
+    // Construir query según el rol
+    let whereClause;
+    let queryParams;
+    
+    if (usuario[0]?.rol === 'validador_c3') {
+      // C3 puede ver trámites en fases específicas
+      whereClause = 't.id = ? AND t.fase_actual IN (?, ?, ?, ?)';
+      queryParams = [id, 'enviado_c3', 'validado_c3', 'revision_propuesta_c3', 'rechazado'];
+    } else {
+      // Analistas solo ven sus propios trámites
+      whereClause = 't.id = ? AND t.usuario_analista_c5_id = ?';
+      queryParams = [id, req.userId];
+    }
+
     const [solicitudes] = await connection.query(
       `SELECT 
         t.*,
@@ -220,14 +240,14 @@ export const obtenerSolicitudPorId = async (req, res) => {
       LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
-      WHERE t.id = ? AND t.usuario_analista_c5_id = ?`,
-      [id, req.userId]
+      WHERE ${whereClause}`,
+      queryParams
     );
 
     if (solicitudes.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Solicitud no encontrada'
+        message: 'Solicitud no encontrada o no tienes permisos'
       });
     }
 
@@ -376,62 +396,69 @@ export const enviarSolicitudAC3 = async (req, res) => {
 // ============================================
 
 /**
- * PASO 3: Recibir solicitudes pendientes (Vista C3)
- * Imágenes 3, 4, 7 del mockup - "Panel de Validación C3"
+ * PASO 3: Ver PERSONAS pendientes para C3 (Vista por persona individual)
+ * C3 ve tabla de personas, no de trámites
  */
-export const obtenerSolicitudesPendientesC3 = async (req, res) => {
+export const obtenerPersonasPendientesC3 = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    // Obtener trámites que fueron enviados a C3 y están pendientes de dictamen
-    const [solicitudes] = await connection.query(
-      `SELECT 
-        t.*,
+    const { busqueda } = req.query;
+
+    let query = `
+      SELECT 
+        p.*,
+        t.numero_solicitud,
+        t.fecha_solicitud,
+        t.fase_actual as tramite_fase,
+        CONCAT(p.nombre, ' ', p.apellido_paterno, ' ', IFNULL(p.apellido_materno, '')) as nombre_completo,
+        pu.nombre as puesto_nombre,
+        pu.es_competencia_municipal,
+        pu_propuesto.nombre as puesto_propuesto_nombre,
         m.nombre as municipio_nombre,
-        r.nombre as region_nombre,
-        tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
-        ua.nombre_completo as analista_nombre,
-        ua.extension as analista_extension
-      FROM tramites_alta t
+        ua.nombre_completo as analista_nombre
+      FROM personas_tramite_alta p
+      INNER JOIN tramites_alta t ON p.tramite_alta_id = t.id
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      LEFT JOIN puestos pu_propuesto ON p.puesto_propuesto_c3_id = pu_propuesto.id
       LEFT JOIN municipios m ON t.municipio_id = m.id
-      LEFT JOIN regiones r ON m.region_id = r.id
-      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
       LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
-      WHERE t.fase_actual = 'enviado_c3'
-      ORDER BY t.created_at ASC`
-    );
+      WHERE t.fase_actual IN ('enviado_c3', 'revision_propuesta_c3')
+        AND p.rechazado = FALSE
+        AND (p.validado = TRUE OR p.validado = FALSE)
+    `;
 
-    // Para cada trámite, obtener sus personas
-    for (let tramite of solicitudes) {
-      const [personas] = await connection.query(
-        `SELECT 
-          p.*,
-          pu.nombre as puesto_nombre,
-          pu.es_competencia_municipal,
-          pu.motivo_no_competencia
-        FROM personas_tramite_alta p
-        LEFT JOIN puestos pu ON p.puesto_id = pu.id
-        WHERE p.tramite_alta_id = ?
-        ORDER BY p.created_at ASC`,
-        [tramite.id]
-      );
-      tramite.personas = personas;
+    const params = [];
+
+    if (busqueda) {
+      query += ` AND (
+        p.nombre LIKE ? OR 
+        p.apellido_paterno LIKE ? OR 
+        p.apellido_materno LIKE ? OR
+        t.numero_solicitud LIKE ?
+      )`;
+      const searchTerm = `%${busqueda}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
     }
+
+    query += ' ORDER BY t.created_at ASC, p.created_at ASC';
+
+    const [personas] = await connection.query(query, params);
 
     res.json({
       success: true,
-      data: solicitudes,
-      total: solicitudes.length,
-      message: `${solicitudes.length} solicitudes pendientes de dictamen C3`
+      data: personas,
+      total: personas.length,
+      message: `${personas.length} personas pendientes de dictamen C3`
     });
 
   } catch (error) {
-    console.error('Error al obtener solicitudes pendientes C3:', error);
+    console.error('Error al obtener personas pendientes C3:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al obtener solicitudes pendientes',
+      message: 'Error al obtener personas pendientes',
       error: error.message
     });
   } finally {
@@ -442,6 +469,7 @@ export const obtenerSolicitudesPendientesC3 = async (req, res) => {
 /**
  * Obtener detalle de una solicitud para C3
  * Permite a C3 ver cualquier solicitud enviada para validación
+ * SOLO muestra personas NO rechazadas
  */
 export const obtenerSolicitudParaC3 = async (req, res) => {
   const connection = await pool.getConnection();
@@ -477,7 +505,7 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
       });
     }
 
-    // Obtener personas del trámite
+    // Obtener personas del trámite - EXCLUIR RECHAZADAS
     const [personas] = await connection.query(
       `SELECT 
         p.*,
@@ -486,7 +514,7 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
         pu.motivo_no_competencia
       FROM personas_tramite_alta p
       LEFT JOIN puestos pu ON p.puesto_id = pu.id
-      WHERE p.tramite_alta_id = ?
+      WHERE p.tramite_alta_id = ? AND p.rechazado = FALSE
       ORDER BY p.created_at ASC`,
       [id]
     );
@@ -524,104 +552,146 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
   }
 };
 
-export const emitirDictamenC3 = async (req, res) => {
+/**
+ * C3 emite dictamen para UNA PERSONA individual
+ * No para el trámite completo
+ */
+export const emitirDictamenPersonaC3 = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
     await connection.beginTransaction();
 
-    const { tramite_id, dictamen, observaciones_c3, propuestas_cambio_puesto } = req.body;
+    const { persona_id } = req.params;
+    const { estatus, observaciones_c3, puesto_propuesto_id } = req.body;
 
-    // Verificar que el trámite existe y está en fase enviado_c3
-    const [tramites] = await connection.query(
-      'SELECT * FROM tramites_alta WHERE id = ? AND fase_actual = ?',
-      [tramite_id, 'enviado_c3']
-    );
-
-    if (tramites.length === 0) {
-      return res.status(404).json({
+    // Validar estatus
+    const estatusPermitidos = ['ALTA OK', 'NO PUEDE SER DADO DE ALTA', 'PENDIENTE'];
+    if (!estatusPermitidos.includes(estatus)) {
+      return res.status(400).json({
         success: false,
-        message: 'Trámite no encontrado o no está en fase de validación C3'
+        message: 'Estatus inválido. Use: ALTA OK, NO PUEDE SER DADO DE ALTA, o PENDIENTE'
       });
     }
 
-    // Si hay propuestas de cambio de puesto, procesarlas
-    let tienePropuestas = false;
-    if (propuestas_cambio_puesto && Array.isArray(propuestas_cambio_puesto) && propuestas_cambio_puesto.length > 0) {
-      for (const propuesta of propuestas_cambio_puesto) {
-        const { persona_id, puesto_propuesto_id } = propuesta;
-        
-        if (persona_id && puesto_propuesto_id) {
-          // Actualizar persona con propuesta de cambio
-          await connection.query(
-            `UPDATE personas_tramite_alta 
-             SET puesto_propuesto_c3_id = ?,
-                 tiene_propuesta_cambio = TRUE,
-                 decision_final_c5 = 'pendiente'
-             WHERE id = ? AND tramite_alta_id = ?`,
-            [puesto_propuesto_id, persona_id, tramite_id]
-          );
-          tienePropuestas = true;
-        }
+    // Verificar que la persona existe y pertenece a un trámite en fase correcta
+    const [personas] = await connection.query(
+      `SELECT p.*, t.fase_actual, t.id as tramite_id
+       FROM personas_tramite_alta p
+       INNER JOIN tramites_alta t ON p.tramite_alta_id = t.id
+       WHERE p.id = ? AND t.fase_actual IN ('enviado_c3', 'revision_propuesta_c3')`,
+      [persona_id]
+    );
+
+    if (personas.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Persona no encontrada o el trámite no está en fase de validación C3'
+      });
+    }
+
+    const persona = personas[0];
+
+    // Aplicar dictamen
+    if (estatus === 'ALTA OK') {
+      // Si tiene propuesta de puesto, marcar como propuesta
+      if (puesto_propuesto_id) {
+        await connection.query(
+          `UPDATE personas_tramite_alta 
+           SET validado = TRUE,
+               rechazado = FALSE,
+               puesto_propuesto_c3_id = ?,
+               tiene_propuesta_cambio = TRUE,
+               decision_final_c5 = 'pendiente',
+               motivo_rechazo = ?
+           WHERE id = ?`,
+          [puesto_propuesto_id, observaciones_c3 || null, persona_id]
+        );
+      } else {
+        // Sin propuesta, solo validar
+        await connection.query(
+          `UPDATE personas_tramite_alta 
+           SET validado = TRUE,
+               rechazado = FALSE,
+               motivo_rechazo = ?
+           WHERE id = ?`,
+          [observaciones_c3 || null, persona_id]
+        );
       }
-    }
+      
+      // Actualizar el validador C3 en el trámite
+      await connection.query(
+        'UPDATE tramites_alta SET usuario_validador_c3_id = ? WHERE id = ?',
+        [req.userId, persona.tramite_id]
+      );
 
-    let nuevaFase;
-    if (tienePropuestas) {
-      // Si hay propuestas, enviar a revisión de C5
-      nuevaFase = 'revision_propuesta_c3';
-    } else if (dictamen === 'ALTA OK' || dictamen === 'APROBADO') {
-      nuevaFase = 'validado_c3';
-    } else if (dictamen === 'NO PUEDE SER DADO DE ALTA' || dictamen === 'RECHAZADO') {
-      nuevaFase = 'rechazado';
-    } else {
-      nuevaFase = 'filtro_competencia_c5';
+    } else if (estatus === 'NO PUEDE SER DADO DE ALTA') {
+      // Rechazar persona
+      await connection.query(
+        `UPDATE personas_tramite_alta 
+         SET validado = FALSE,
+             rechazado = TRUE,
+             motivo_rechazo = ?
+         WHERE id = ?`,
+        [observaciones_c3 || 'Rechazado por C3', persona_id]
+      );
     }
+    // Si es PENDIENTE, no se hace nada (queda sin validar ni rechazar)
 
-    // Actualizar trámite con dictamen C3
-    await connection.query(
-      `UPDATE tramites_alta 
-       SET fase_actual = ?,
-           usuario_validador_c3_id = ?,
-           observaciones = CONCAT(COALESCE(observaciones, ''), '\n\n[DICTAMEN C3]: ', ?)
-       WHERE id = ?`,
-      [nuevaFase, req.userId, observaciones_c3 || dictamen, tramite_id]
+    // Verificar si todas las personas del trámite ya fueron dictaminadas
+    const [stats] = await connection.query(
+      `SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN validado = TRUE OR rechazado = TRUE THEN 1 ELSE 0 END) as dictaminadas,
+        SUM(CASE WHEN tiene_propuesta_cambio = TRUE THEN 1 ELSE 0 END) as con_propuestas
+      FROM personas_tramite_alta
+      WHERE tramite_alta_id = ?`,
+      [persona.tramite_id]
     );
 
-    // Registrar en historial
-    const comentarioHistorial = tienePropuestas 
-      ? `Dictamen C3: ${dictamen} - CON PROPUESTAS DE CAMBIO DE PUESTO` 
-      : `Dictamen C3: ${dictamen}`;
+    const allDictaminadas = stats[0].total === stats[0].dictaminadas;
+    const hayPropuestas = stats[0].con_propuestas > 0;
 
-    await connection.query(
-      `INSERT INTO historial_tramites_alta (
-        tramite_alta_id, 
-        usuario_id, 
-        fase_anterior, 
-        fase_nueva, 
-        comentario
-      ) VALUES (?, ?, 'enviado_c3', ?, ?)`,
-      [tramite_id, req.userId, nuevaFase, comentarioHistorial]
-    );
+    if (allDictaminadas) {
+      // Cambiar fase del trámite según haya propuestas o no
+      const nuevaFase = hayPropuestas ? 'revision_propuesta_c3' : 'validado_c3';
+      
+      await connection.query(
+        'UPDATE tramites_alta SET fase_actual = ? WHERE id = ?',
+        [nuevaFase, persona.tramite_id]
+      );
+
+      await connection.query(
+        `INSERT INTO historial_tramites_alta (
+          tramite_alta_id, usuario_id, fase_anterior, fase_nueva, comentario
+        ) VALUES (?, ?, 'enviado_c3', ?, ?)`,
+        [
+          persona.tramite_id, 
+          req.userId, 
+          nuevaFase,
+          hayPropuestas 
+            ? 'Todas las personas dictaminadas - CON PROPUESTAS DE CAMBIO' 
+            : 'Todas las personas dictaminadas por C3'
+        ]
+      );
+    }
 
     await connection.commit();
 
     res.json({
       success: true,
-      message: tienePropuestas 
-        ? 'Dictamen C3 registrado con propuestas de cambio de puesto. Enviado a revisión de C5'
-        : 'Dictamen C3 registrado exitosamente',
+      message: `Dictamen registrado para persona ${persona_id}`,
       data: {
-        tramite_id,
-        dictamen,
-        fase_nueva: nuevaFase,
-        tiene_propuestas: tienePropuestas
+        persona_id,
+        estatus,
+        tiene_propuesta: !!puesto_propuesto_id,
+        tramite_completo: allDictaminadas
       }
     });
 
   } catch (error) {
     await connection.rollback();
-    console.error('Error al emitir dictamen C3:', error);
+    console.error('Error al emitir dictamen persona C3:', error);
     res.status(500).json({
       success: false,
       message: 'Error al emitir dictamen',
@@ -722,6 +792,109 @@ export const obtenerHistorialC3 = async (req, res) => {
 // ============================================
 // PASO 2: VALIDACIÓN DE PERSONAL
 // ============================================
+
+/**
+ * C5 obtiene TODAS las personas de TODOS los trámites
+ * Vista unificada para ver el estatus de cada persona
+ */
+export const obtenerTodasLasPersonasC5 = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { busqueda, fase_tramite, estatus_persona } = req.query;
+
+    let query = `
+      SELECT 
+        p.*,
+        CONCAT(p.nombre, ' ', p.apellido_paterno, ' ', IFNULL(p.apellido_materno, '')) as nombre_completo,
+        t.numero_solicitud,
+        t.fase_actual as tramite_fase,
+        t.fecha_solicitud,
+        t.usuario_analista_c5_id,
+        pu.nombre as puesto_original_nombre,
+        pu.es_competencia_municipal as puesto_original_es_municipal,
+        pu_propuesto.nombre as puesto_propuesto_nombre,
+        pu_propuesto.es_competencia_municipal as puesto_propuesto_es_municipal,
+        m.nombre as municipio_nombre,
+        dep.nombre as dependencia_nombre,
+        ua.nombre_completo as analista_nombre,
+        uv.nombre_completo as validador_c3_nombre,
+        CASE 
+          WHEN p.validado = TRUE AND p.tiene_propuesta_cambio = FALSE THEN 'Aprobado por C3'
+          WHEN p.validado = TRUE AND p.tiene_propuesta_cambio = TRUE AND p.decision_final_c5 = 'propuesta' THEN 'Aprobado con cambio (C5 aceptó)'
+          WHEN p.validado = TRUE AND p.tiene_propuesta_cambio = TRUE AND p.decision_final_c5 = 'original' THEN 'Aprobado sin cambio (C5 rechazó propuesta)'
+          WHEN p.validado = TRUE AND p.tiene_propuesta_cambio = TRUE AND p.decision_final_c5 = 'pendiente' THEN 'Aprobado con propuesta (Pendiente decisión C5)'
+          WHEN p.rechazado = TRUE THEN 'Rechazado'
+          WHEN t.fase_actual = 'enviado_c3' THEN 'Pendiente dictamen C3'
+          WHEN t.fase_actual = 'datos_solicitud' THEN 'En captura'
+          WHEN t.fase_actual = 'validacion_personal' THEN 'En validación C5'
+          ELSE 'Pendiente'
+        END as estatus_descriptivo
+      FROM personas_tramite_alta p
+      INNER JOIN tramites_alta t ON p.tramite_alta_id = t.id
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
+      LEFT JOIN puestos pu_propuesto ON p.puesto_propuesto_c3_id = pu_propuesto.id
+      LEFT JOIN municipios m ON t.municipio_id = m.id
+      LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
+      LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
+      LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    // Filtrar solo los trámites del analista actual
+    query += ' AND t.usuario_analista_c5_id = ?';
+    params.push(req.userId);
+
+    if (busqueda) {
+      query += ` AND (
+        p.nombre LIKE ? OR 
+        p.apellido_paterno LIKE ? OR 
+        p.apellido_materno LIKE ? OR
+        t.numero_solicitud LIKE ?
+      )`;
+      const searchTerm = `%${busqueda}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    if (fase_tramite) {
+      query += ' AND t.fase_actual = ?';
+      params.push(fase_tramite);
+    }
+
+    if (estatus_persona) {
+      if (estatus_persona === 'validado') {
+        query += ' AND p.validado = TRUE';
+      } else if (estatus_persona === 'rechazado') {
+        query += ' AND p.rechazado = TRUE';
+      } else if (estatus_persona === 'pendiente') {
+        query += ' AND p.validado = FALSE AND p.rechazado = FALSE';
+      }
+    }
+
+    query += ' ORDER BY t.created_at DESC, p.created_at ASC';
+
+    const [personas] = await connection.query(query, params);
+
+    res.json({
+      success: true,
+      data: personas,
+      total: personas.length,
+      message: `${personas.length} personas encontradas`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener personas C5:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener personas',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
 
 /**
  * Agregar persona al trámite (PASO 2)
