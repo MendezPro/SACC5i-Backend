@@ -15,7 +15,8 @@ import {
   obtenerTodasLasPersonasC5,
   obtenerTramitesRechazados,
   obtenerPropuestasC3,
-  emitirDecisionFinalC5
+  emitirDecisionFinalC5,
+  debugTramiteEstado
 } from '../controllers/altaController.js';
 import { authMiddleware } from '../middlewares/authMiddleware.js';
 import { requireRole } from '../middlewares/roleMiddleware.js';
@@ -972,5 +973,23 @@ router.post('/decision-final-c5',
   validate,
   emitirDecisionFinalC5
 );
+
+/**
+ * @swagger
+ * /api/tramites/alta/debug/{tramite_id}:
+ *   get:
+ *     summary: DEBUG - Ver estado de dictámenes
+ *     tags: [DEBUG]
+ *     parameters:
+ *       - in: path
+ *         name: tramite_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Estado del trámite
+ */
+router.get('/debug/:tramite_id', authMiddleware, debugTramiteEstado);
 
 export default router;

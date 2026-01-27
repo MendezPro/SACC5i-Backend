@@ -427,7 +427,7 @@ export const obtenerPersonasPendientesC3 = async (req, res) => {
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       WHERE t.fase_actual IN ('enviado_c3', 'revision_propuesta_c3')
         AND p.rechazado = FALSE
-        AND (p.validado = TRUE OR p.validado = FALSE)
+        AND p.validado = TRUE
     `;
 
     const params = [];
@@ -505,16 +505,18 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
       });
     }
 
-    // Obtener personas del trámite - EXCLUIR RECHAZADAS
+    // Obtener personas del trámite - MOSTRAR TODAS para contexto
     const [personas] = await connection.query(
       `SELECT 
         p.*,
         pu.nombre as puesto_nombre,
         pu.es_competencia_municipal,
-        pu.motivo_no_competencia
+        pu.motivo_no_competencia,
+        pu_propuesto.nombre as puesto_propuesto_nombre
       FROM personas_tramite_alta p
       LEFT JOIN puestos pu ON p.puesto_id = pu.id
-      WHERE p.tramite_alta_id = ? AND p.rechazado = FALSE
+      LEFT JOIN puestos pu_propuesto ON p.puesto_propuesto_c3_id = pu_propuesto.id
+      WHERE p.tramite_alta_id = ?
       ORDER BY p.created_at ASC`,
       [id]
     );
@@ -549,6 +551,62 @@ export const obtenerSolicitudParaC3 = async (req, res) => {
     });
   } finally {
     connection.release();
+  }
+};
+
+/**
+ * DEBUG: Ver estado de dictámenes de un trámite
+ */
+export const debugTramiteEstado = async (req, res) => {
+  try {
+    const { tramite_id } = req.params;
+
+    const [tramite] = await pool.query(
+      'SELECT id, numero_solicitud, fase_actual FROM tramites_alta WHERE id = ?',
+      [tramite_id]
+    );
+
+    if (tramite.length === 0) {
+      return res.status(404).json({ success: false, message: 'Trámite no encontrado' });
+    }
+
+    const [personas] = await pool.query(
+      `SELECT id, nombre, apellido_paterno, validado, rechazado, 
+              tiene_propuesta_cambio, observaciones_c3, puesto_propuesto_c3_id,
+              decision_final_c5
+       FROM personas_tramite_alta 
+       WHERE tramite_alta_id = ?`,
+      [tramite_id]
+    );
+
+    const [stats] = await pool.query(
+      `SELECT 
+        COUNT(*) as total_personas,
+        SUM(CASE WHEN validado = TRUE THEN 1 ELSE 0 END) as validadas_c5,
+        SUM(CASE WHEN rechazado = TRUE THEN 1 ELSE 0 END) as rechazadas_total,
+        SUM(CASE WHEN validado = TRUE AND (tiene_propuesta_cambio = TRUE OR observaciones_c3 IS NOT NULL OR rechazado = TRUE) THEN 1 ELSE 0 END) as dictaminadas_c3
+      FROM personas_tramite_alta
+      WHERE tramite_alta_id = ?`,
+      [tramite_id]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        tramite: tramite[0],
+        personas,
+        estadisticas: stats[0],
+        criterio_cambio_fase: {
+          todas_dictaminadas: stats[0].validadas_c5 === stats[0].dictaminadas_c3,
+          personas_c5_valido: stats[0].validadas_c5,
+          personas_c3_dictamino: stats[0].dictaminadas_c3
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error debug tramite:', error);
+    res.status(500).json({ success: false, message: 'Error en debug' });
   }
 };
 
@@ -603,9 +661,9 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
                puesto_propuesto_c3_id = ?,
                tiene_propuesta_cambio = TRUE,
                decision_final_c5 = 'pendiente',
-               motivo_rechazo = ?
+               observaciones_c3 = ?
            WHERE id = ?`,
-          [puesto_propuesto_id, observaciones_c3 || null, persona_id]
+          [puesto_propuesto_id, observaciones_c3 || 'Propuesta de cambio de puesto', persona_id]
         );
       } else {
         // Sin propuesta, solo validar
@@ -613,7 +671,7 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
           `UPDATE personas_tramite_alta 
            SET validado = TRUE,
                rechazado = FALSE,
-               motivo_rechazo = ?
+               observaciones_c3 = ?
            WHERE id = ?`,
           [observaciones_c3 || null, persona_id]
         );
@@ -626,11 +684,11 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
       );
 
     } else if (estatus === 'NO PUEDE SER DADO DE ALTA') {
-      // Rechazar persona
+      // Rechazar persona - MANTENER validado = TRUE porque C5 SÍ lo validó
       await connection.query(
         `UPDATE personas_tramite_alta 
-         SET validado = FALSE,
-             rechazado = TRUE,
+         SET validado = TRUE,
+             rechazado = TRUE, 
              motivo_rechazo = ?
          WHERE id = ?`,
         [observaciones_c3 || 'Rechazado por C3', persona_id]
@@ -638,40 +696,72 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
     }
     // Si es PENDIENTE, no se hace nada (queda sin validar ni rechazar)
 
-    // Verificar si todas las personas del trámite ya fueron dictaminadas
+    // Verificar si todas las personas QUE C5 VALIDÓ ya fueron dictaminadas por C3
+    // Solo contamos personas con validado=TRUE inicial (las que C5 aprobó y envió a C3)
+    // Las personas con validado=FALSE son rechazos de C5, nunca llegan a C3
     const [stats] = await connection.query(
       `SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN validado = TRUE OR rechazado = TRUE THEN 1 ELSE 0 END) as dictaminadas,
-        SUM(CASE WHEN tiene_propuesta_cambio = TRUE THEN 1 ELSE 0 END) as con_propuestas
+        SUM(CASE WHEN tiene_propuesta_cambio = TRUE OR observaciones_c3 IS NOT NULL OR rechazado = TRUE THEN 1 ELSE 0 END) as dictaminadas,
+        SUM(CASE WHEN tiene_propuesta_cambio = TRUE AND rechazado = FALSE THEN 1 ELSE 0 END) as con_propuestas,
+        SUM(CASE WHEN rechazado = FALSE THEN 1 ELSE 0 END) as no_rechazadas
       FROM personas_tramite_alta
-      WHERE tramite_alta_id = ?`,
+      WHERE tramite_alta_id = ? AND validado = TRUE`,
       [persona.tramite_id]
     );
 
     const allDictaminadas = stats[0].total === stats[0].dictaminadas;
     const hayPropuestas = stats[0].con_propuestas > 0;
+    const todasRechazadas = stats[0].no_rechazadas === 0;
+
+    // DEBUG: Ver qué está contando
+    console.log('🔍 DEBUG DICTAMEN C3:', {
+      tramite_id: persona.tramite_id,
+      total_personas_validadas_c5: stats[0].total,
+      dictaminadas_por_c3: stats[0].dictaminadas,
+      con_propuestas: stats[0].con_propuestas,
+      no_rechazadas: stats[0].no_rechazadas,
+      allDictaminadas,
+      hayPropuestas,
+      todasRechazadas
+    });
+
+    let nuevaFase = null;
 
     if (allDictaminadas) {
-      // Cambiar fase del trámite según haya propuestas o no
-      const nuevaFase = hayPropuestas ? 'revision_propuesta_c3' : 'validado_c3';
+      if (todasRechazadas) {
+        // Si todas fueron rechazadas, marcar trámite como rechazado
+        nuevaFase = 'rechazado';
+      } else if (hayPropuestas) {
+        // Si hay propuestas (y no todas rechazadas), enviar a revisión C5
+        nuevaFase = 'revision_propuesta_c3';
+      } else {
+        // Si todas aprobadas sin propuestas, marcar como validado
+        nuevaFase = 'validado_c3';
+      }
       
       await connection.query(
         'UPDATE tramites_alta SET fase_actual = ? WHERE id = ?',
         [nuevaFase, persona.tramite_id]
       );
 
+      let comentarioHistorial = 'Todas las personas dictaminadas por C3';
+      if (todasRechazadas) {
+        comentarioHistorial = 'Todas las personas rechazadas por C3';
+      } else if (hayPropuestas) {
+        comentarioHistorial = `Dictamen C3 completado - ${stats[0].con_propuestas} propuesta(s) de cambio de puesto`;
+      }
+
       await connection.query(
         `INSERT INTO historial_tramites_alta (
           tramite_alta_id, usuario_id, fase_anterior, fase_nueva, comentario
-        ) VALUES (?, ?, 'enviado_c3', ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?)`,
         [
           persona.tramite_id, 
           req.userId, 
+          persona.fase_actual, // Usar la fase anterior del trámite
           nuevaFase,
-          hayPropuestas 
-            ? 'Todas las personas dictaminadas - CON PROPUESTAS DE CAMBIO' 
-            : 'Todas las personas dictaminadas por C3'
+          comentarioHistorial
         ]
       );
     }
@@ -685,7 +775,8 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
         persona_id,
         estatus,
         tiene_propuesta: !!puesto_propuesto_id,
-        tramite_completo: allDictaminadas
+        tramite_completo: allDictaminadas,
+        fase_nueva: nuevaFase || persona.fase_actual
       }
     });
 
@@ -744,8 +835,8 @@ export const obtenerHistorialC3 = async (req, res) => {
     }
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ? OR ua.nombre_completo LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
     }
 
     if (dictamen) {
@@ -1243,9 +1334,10 @@ export const obtenerTramitesRechazados = async (req, res) => {
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
       WHERE (t.fase_actual = 'rechazado' OR t.fase_actual = 'rechazado_no_corresponde')
+        AND t.usuario_analista_c5_id = ?
     `;
 
-    const params = [];
+    const params = [req.userId];
 
     if (fecha_inicio && fecha_fin) {
       query += ' AND t.updated_at BETWEEN ? AND ?';
@@ -1253,8 +1345,8 @@ export const obtenerTramitesRechazados = async (req, res) => {
     }
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ? OR r.nombre LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
     }
 
     if (fase_rechazo) {
@@ -1368,8 +1460,8 @@ export const obtenerPropuestasC3 = async (req, res) => {
     const params = [req.userId];
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ? OR r.nombre LIKE ? OR uv.nombre_completo LIKE ?)';
+      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
     }
 
     query += ' ORDER BY t.updated_at DESC';
