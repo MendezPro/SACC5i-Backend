@@ -13,7 +13,7 @@ import {
   obtenerHistorialC3,
   emitirDictamenPersonaC3,
   obtenerTodasLasPersonasC5,
-  obtenerTramitesRechazados,
+  obtenerPersonasRechazadas,
   obtenerPropuestasC3,
   emitirDecisionFinalC5,
   debugTramiteEstado
@@ -233,7 +233,15 @@ router.get('/personas-pendientes-c3',
  *   post:
  *     tags: [Trámites - ALTA - C3]
  *     summary: Emitir dictamen para UNA persona (NO para el trámite completo)
- *     description: C3 dicta sobre una persona individual. Puede marcar ALTA OK, NO PUEDE SER DADO DE ALTA, o dejar PENDIENTE. Opcionalmente puede proponer un cambio de puesto.
+ *     description: |
+ *       C3 dicta sobre una persona individual que C5 validó previamente.
+ *       
+ *       **Opciones de C3:**
+ *       1. **ALTA OK** - Aprobar sin cambios
+ *       2. **ALTA OK con propuesta** - Aprobar pero sugerir otro puesto (puede ser competencia o NO competencia)
+ *       3. **NO PUEDE SER DADO DE ALTA** - Rechazar
+ *       
+ *       ⚠️ C3 puede proponer CUALQUIER puesto (incluso CUSTODIO, MILITAR, etc.). El segundo filtro lo hace C5 después.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -497,6 +505,117 @@ router.get('/c3/:id',
   obtenerSolicitudParaC3
 );
 
+// ============================================
+// TABLA DE PERSONAS RECHAZADAS (C5 y C3)
+// ============================================
+
+/**
+ * @swagger
+ * /api/tramites/alta/personas-rechazadas:
+ *   get:
+ *     summary: 📋 Historial de personas rechazadas (C5 y C3)
+ *     description: |
+ *       **Tabla unificada de TODAS las PERSONAS rechazadas** (no trámites).
+ *       
+ *       Vista por persona individual - Cada registro es una persona que fue rechazada en alguna etapa.
+ *       
+ *       **✅ Acceso:**
+ *       - **C5 (Analistas)**: Ven personas rechazadas de sus propios trámites
+ *       - **C3 (Validadores)**: Ven personas rechazadas de trámites que procesaron
+ *       
+ *       **❌ Etapas de rechazo posibles:**
+ *       1. **Validación de Personal (Filtro Automático)** → Puesto no competencia (GUARDIA, CUSTODIO, etc.)
+ *       2. **Validación de Personal (Rechazo Manual C5)** → Motivo específico (ej: "Documentación incompleta")
+ *       3. **Dictamen C3** → "NO PUEDE SER DADO DE ALTA"
+ *       
+ *       **⚠️ IMPORTANTE:**
+ *       - Una persona solo puede ser rechazada UNA VEZ en el sistema
+ *       - Una vez rechazada, NO continúa el flujo
+ *       - Este es un historial permanente y auditable
+ *       
+ *       **🔍 Filtros opcionales:**
+ *       - Sin parámetros: Muestra TODAS las personas rechazadas
+ *       - Con filtros: Permite búsqueda por fecha, nombre, etapa, etc.
+ *       
+ *       **📋 Incluye:**
+ *       - Datos completos de la persona
+ *       - Etapa exacta donde fue rechazada
+ *       - Motivo detallado del rechazo
+ *       - Fechas y horas precisas
+ *       - Responsables (Analista C5 y/o Validador C3)
+ *       - Texto formateado para copiar al portapapeles
+ *     tags: [📊 Historial y Reportes]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: fecha_inicio
+ *         schema: { type: string, format: date }
+ *         description: Filtrar desde esta fecha
+ *       - in: query
+ *         name: fecha_fin
+ *         schema: { type: string, format: date }
+ *         description: Filtrar hasta esta fecha
+ *       - in: query
+ *         name: busqueda
+ *         schema: { type: string }
+ *         description: Buscar por nombre, número de solicitud, municipio o dependencia
+ *       - in: query
+ *         name: etapa_rechazo
+ *         schema:
+ *           type: string
+ *           enum: [competencia, c5, c3]
+ *         description: |
+ *           Filtrar por etapa:
+ *           - `competencia` = Filtro automático de competencia
+ *           - `c5` = Rechazo manual de C5
+ *           - `c3` = Dictamen C3 negativo
+ *     responses:
+ *       200:
+ *         description: Lista de personas rechazadas con documentación detallada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: integer, example: 42 }
+ *                       nombre_completo: { type: string, example: "Juan Pérez García" }
+ *                       numero_solicitud: { type: string, example: "ALTA-2026-000001" }
+ *                       puesto_solicitado: { type: string, example: "CUSTODIO" }
+ *                       es_competencia_municipal: { type: boolean, example: false }
+ *                       etapa_rechazo_descriptiva: { type: string, example: "Validación de Personal (Filtro Automático de Competencia)" }
+ *                       motivo_especifico: { type: string, example: "Competencia del ámbito federal - CNSP" }
+ *                       municipio_nombre: { type: string }
+ *                       dependencia_nombre: { type: string }
+ *                       analista_nombre: { type: string }
+ *                       validador_c3_nombre: { type: string, nullable: true }
+ *                       documentacion_detallada:
+ *                         type: object
+ *                         description: Card con información completa y texto copiable
+ *                         properties:
+ *                           nombre_completo: { type: string }
+ *                           puesto_solicitado: { type: string }
+ *                           etapa_rechazo: { type: string }
+ *                           motivo_especifico: { type: string }
+ *                           fecha_completa: { type: string, example: "miércoles, 28 de enero de 2026" }
+ *                           hora: { type: string, example: "13:45:30" }
+ *                           texto_copiable: { type: string, description: "Texto formateado para copiar" }
+ *                 total: { type: integer, example: 12 }
+ *                 message: { type: string, example: "12 persona(s) rechazada(s) encontrada(s)" }
+ *       403:
+ *         description: Acceso denegado - Solo C5 y C3
+ */
+router.get('/personas-rechazadas',
+  authMiddleware, // Ambos roles pueden acceder
+  obtenerPersonasRechazadas
+);
+
 /**
  * @swagger
  * /api/tramites/alta/{id}:
@@ -530,8 +649,14 @@ router.get('/:id',
  * /api/tramites/alta/{tramite_id}/personas:
  *   post:
  *     tags: [C5 - Gestión de Trámites]
- *     summary: PASO 2 - Agregar persona al trámite
- *     description: Agrega una persona al trámite para validación. Si el puesto NO es competencia municipal (CUSTODIO, GUARDIA NACIONAL, MILITAR), se rechaza automáticamente.
+ *     summary: PASO 2 - Agregar persona al trámite (Primer filtro de competencia)
+ *     description: |
+ *       Agrega una persona al trámite. **FILTRO AUTOMÁTICO DE COMPETENCIA:**
+ *       
+ *       - ✅ Puestos municipales (POLICÍA MUNICIPAL, AUXILIAR, etc.) → Se agregan normalmente
+ *       - ❌ Puestos NO municipales (CUSTODIO, MILITAR, GUARDIA) → **Rechazados automáticamente** → Van a tabla de rechazados
+ *       
+ *       Este es el **primer filtro de competencia**. Solo personas con puestos válidos pueden continuar a C3.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -724,100 +849,6 @@ router.post('/enviar-a-c3',
 );
 
 // ============================================
-// TABLA DE RECHAZADOS (Solo C5)
-// ============================================
-
-/**
- * @swagger
- * /api/tramites/alta/rechazados:
- *   get:
- *     summary: Obtener tabla de trámites rechazados (Solo C5)
- *     tags: [C5 - Gestión de Trámites]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: fecha_inicio
- *         schema:
- *           type: string
- *           format: date
- *         description: Filtrar desde esta fecha
- *       - in: query
- *         name: fecha_fin
- *         schema:
- *           type: string
- *           format: date
- *         description: Filtrar hasta esta fecha
- *       - in: query
- *         name: busqueda
- *         schema:
- *           type: string
- *         description: Búsqueda por número de solicitud, municipio o dependencia
- *       - in: query
- *         name: fase_rechazo
- *         schema:
- *           type: string
- *           enum: [rechazado, rechazado_no_corresponde]
- *         description: Filtrar por tipo de rechazo
- *     responses:
- *       200:
- *         description: Lista de trámites rechazados
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: integer
- *                         example: 15
- *                       numero_solicitud:
- *                         type: string
- *                         example: "ALTA-2025-000015"
- *                       fase_actual:
- *                         type: string
- *                         example: "rechazado_no_corresponde"
- *                       etapa_rechazo:
- *                         type: string
- *                         example: "Validación de Personal (Filtro de Competencia)"
- *                       motivo_rechazo_general:
- *                         type: string
- *                         example: "Puesto(s) fuera de competencia municipal: CUSTODIO"
- *                       fecha_rechazo:
- *                         type: string
- *                         format: date-time
- *                       municipio_nombre:
- *                         type: string
- *                         example: "Tuxtla Gutiérrez"
- *                       dependencia_nombre:
- *                         type: string
- *                         example: "CENTROS DE REINSERCIÓN SOCIAL"
- *                       personas:
- *                         type: array
- *                         items:
- *                           type: object
- *                 total:
- *                   type: integer
- *                   example: 5
- *                 message:
- *                   type: string
- *                   example: "5 trámites rechazados encontrados"
- *       403:
- *         description: Solo analistas C5
- */
-router.get('/rechazados',
-  requireRole('analista'),
-  obtenerTramitesRechazados
-);
-
-// ============================================
 // REVISIÓN DE PROPUESTAS C3 (Solo C5)
 // ============================================
 
@@ -901,7 +932,29 @@ router.get('/propuestas-c3',
  * @swagger
  * /api/tramites/alta/decision-final-c5:
  *   post:
- *     summary: Emitir decisión final de C5 sobre propuestas de C3 (Solo C5)
+ *     summary: Emitir decisión final de C5 sobre propuestas de C3 (Segundo filtro de competencia)
+ *     description: |
+ *       Después de que C3 dictamina, C5 decide sobre las propuestas de cambio de puesto.
+ *       
+ *       **⚠️ SEGUNDO FILTRO DE COMPETENCIA MUNICIPAL:**
+ *       
+ *       Cuando C5 da clic en "Iniciar trámite", aparece el apartado **"Filtro de competencia"**.
+ *       
+ *       **Opciones disponibles:**
+ *       - `"original"` → Mantener el puesto que C5 asignó originalmente
+ *       - `"propuesta"` → Aceptar el puesto propuesto por C3 (⚠️ **EL PUESTO CAMBIA** en BD)
+ *       
+ *       **Validación automática:**
+ *       - ✅ Si selecciona un puesto de competencia municipal → Sistema permite continuar
+ *       - ❌ Si intenta seleccionar un puesto NO municipal (CUSTODIO, MILITAR, etc.) → **Sistema BLOQUEA** con alerta "PUESTO NO CORRESPONDE"
+ *       
+ *       **Ejemplo:**
+ *       - C5 asignó: POLICÍA AUXILIAR (competencia municipal)
+ *       - C3 propuso: CUSTODIO (NO competencia)
+ *       - C5 solo puede elegir "original" (POLICÍA AUXILIAR)
+ *       - Si intenta elegir "propuesta" (CUSTODIO) → Error 400
+ *       
+ *       ℹ️ Una persona solo tiene UN puesto final: o el original o el propuesto, nunca ambos.
  *     tags: [C5 - Gestión de Trámites]
  *     security:
  *       - bearerAuth: []
@@ -929,8 +982,8 @@ router.get('/propuestas-c3',
  *                     decision:
  *                       type: string
  *                       enum: [original, propuesta]
- *                       example: "propuesta"
- *                       description: "original = mantener puesto original, propuesta = aceptar puesto propuesto por C3"
+ *                       example: "original"
+ *                       description: "'original' = mantener puesto asignado | 'propuesta' = aceptar puesto C3 (⚠️ CAMBIA puesto_id + validación automática de competencia)"
  *     responses:
  *       200:
  *         description: Decisión final registrada
@@ -957,7 +1010,30 @@ router.get('/propuestas-c3',
  *                     todas_decisiones_tomadas:
  *                       type: boolean
  *       400:
- *         description: Error en validación
+ *         description: Error - Puesto no corresponde o validación fallida
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "⚠️ PUESTO NO CORRESPONDE: No puede aceptar un puesto fuera de competencia municipal"
+ *                 detalles:
+ *                   type: object
+ *                   properties:
+ *                     puesto_propuesto:
+ *                       type: string
+ *                       example: "CUSTODIO"
+ *                     motivo:
+ *                       type: string
+ *                       example: "Competencia del ámbito federal - CNSP"
+ *                     accion_requerida:
+ *                       type: string
+ *                       example: "Debe seleccionar el puesto original o rechazar la persona"
  *       403:
  *         description: Solo analistas C5
  */

@@ -702,15 +702,15 @@ export const emitirDictamenPersonaC3 = async (req, res) => {
     const [stats] = await connection.query(
       `SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN tiene_propuesta_cambio = TRUE OR observaciones_c3 IS NOT NULL OR rechazado = TRUE THEN 1 ELSE 0 END) as dictaminadas,
-        SUM(CASE WHEN tiene_propuesta_cambio = TRUE AND rechazado = FALSE THEN 1 ELSE 0 END) as con_propuestas,
-        SUM(CASE WHEN rechazado = FALSE THEN 1 ELSE 0 END) as no_rechazadas
+        CAST(SUM(CASE WHEN tiene_propuesta_cambio = TRUE OR observaciones_c3 IS NOT NULL OR rechazado = TRUE THEN 1 ELSE 0 END) AS UNSIGNED) as dictaminadas,
+        CAST(SUM(CASE WHEN tiene_propuesta_cambio = TRUE AND rechazado = FALSE THEN 1 ELSE 0 END) AS UNSIGNED) as con_propuestas,
+        CAST(SUM(CASE WHEN rechazado = FALSE THEN 1 ELSE 0 END) AS UNSIGNED) as no_rechazadas
       FROM personas_tramite_alta
       WHERE tramite_alta_id = ? AND validado = TRUE`,
       [persona.tramite_id]
     );
 
-    const allDictaminadas = stats[0].total === stats[0].dictaminadas;
+    const allDictaminadas = Number(stats[0].total) === Number(stats[0].dictaminadas);
     const hayPropuestas = stats[0].con_propuestas > 0;
     const todasRechazadas = stats[0].no_rechazadas === 0;
 
@@ -1303,119 +1303,189 @@ export const rechazarPersona = async (req, res) => {
 };
 
 // ============================================
-// TABLA DE RECHAZADOS (Solo C5)
+// TABLA DE PERSONAS RECHAZADAS (C5 y C3)
 // ============================================
 
 /**
- * Obtener todos los trámites rechazados
- * Vista general de rechazados para analistas C5
- * Incluye trámites rechazados en cualquier etapa del proceso
+ * Obtener TODAS las PERSONAS rechazadas (no trámites)
+ * Vista por persona individual - Historial completo de rechazos
+ * Visible para C5 y C3
  */
-export const obtenerTramitesRechazados = async (req, res) => {
+export const obtenerPersonasRechazadas = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
-    const { fecha_inicio, fecha_fin, busqueda, fase_rechazo } = req.query;
+    const { fecha_inicio, fecha_fin, busqueda, etapa_rechazo } = req.query;
+
+    // Obtener rol del usuario
+    const [usuario] = await connection.query(
+      'SELECT rol FROM usuarios WHERE id = ?',
+      [req.userId]
+    );
 
     let query = `
       SELECT 
-        t.*,
+        p.id,
+        p.nombre,
+        p.apellido_paterno,
+        p.apellido_materno,
+        CONCAT(p.nombre, ' ', p.apellido_paterno, ' ', IFNULL(p.apellido_materno, '')) as nombre_completo,
+        p.fecha_nacimiento,
+        p.numero_oficio_c3,
+        p.motivo_rechazo,
+        p.observaciones_c3,
+        p.created_at,
+        p.updated_at,
+        p.tramite_alta_id,
+        t.numero_solicitud,
+        t.fase_actual as fase_tramite,
+        t.fecha_solicitud,
+        pu.nombre as puesto_solicitado,
+        pu.es_competencia_municipal,
+        pu.motivo_no_competencia,
         m.nombre as municipio_nombre,
         r.nombre as region_nombre,
-        tipo_ofi.nombre as tipo_oficio_nombre,
         dep.nombre as dependencia_nombre,
         ua.nombre_completo as analista_nombre,
-        uv.nombre_completo as validador_c3_nombre
-      FROM tramites_alta t
+        uv.nombre_completo as validador_c3_nombre,
+        CASE 
+          WHEN pu.es_competencia_municipal = FALSE THEN 'Validación de Personal (Filtro Automático de Competencia)'
+          WHEN p.observaciones_c3 IS NOT NULL AND p.rechazado = TRUE THEN 'Dictamen C3'
+          WHEN p.motivo_rechazo IS NOT NULL AND pu.es_competencia_municipal = TRUE THEN 'Validación de Personal (Rechazo Manual C5)'
+          ELSE 'Otro proceso'
+        END as etapa_rechazo_descriptiva,
+        CASE 
+          WHEN pu.es_competencia_municipal = FALSE THEN pu.motivo_no_competencia
+          WHEN p.observaciones_c3 IS NOT NULL THEN p.observaciones_c3
+          ELSE p.motivo_rechazo
+        END as motivo_especifico
+      FROM personas_tramite_alta p
+      INNER JOIN tramites_alta t ON p.tramite_alta_id = t.id
+      LEFT JOIN puestos pu ON p.puesto_id = pu.id
       LEFT JOIN municipios m ON t.municipio_id = m.id
       LEFT JOIN regiones r ON m.region_id = r.id
-      LEFT JOIN tipos_oficio tipo_ofi ON t.tipo_oficio_id = tipo_ofi.id
       LEFT JOIN dependencias dep ON t.dependencia_id = dep.id
       LEFT JOIN usuarios ua ON t.usuario_analista_c5_id = ua.id
       LEFT JOIN usuarios uv ON t.usuario_validador_c3_id = uv.id
-      WHERE (t.fase_actual = 'rechazado' OR t.fase_actual = 'rechazado_no_corresponde')
-        AND t.usuario_analista_c5_id = ?
+      WHERE p.rechazado = TRUE
     `;
 
-    const params = [req.userId];
+    const params = [];
+
+    // Filtro de privacidad según rol
+    if (usuario[0]?.rol === 'analista') {
+      // C5 solo ve sus propios rechazos
+      query += ' AND t.usuario_analista_c5_id = ?';
+      params.push(req.userId);
+    } else if (usuario[0]?.rol === 'validador_c3') {
+      // C3 ve rechazos de trámites que procesó
+      query += ' AND (t.usuario_validador_c3_id = ? OR t.usuario_validador_c3_id IS NULL)';
+      params.push(req.userId);
+    }
 
     if (fecha_inicio && fecha_fin) {
-      query += ' AND t.updated_at BETWEEN ? AND ?';
+      query += ' AND p.updated_at BETWEEN ? AND ?';
       params.push(fecha_inicio, fecha_fin);
     }
 
     if (busqueda) {
-      query += ' AND (t.numero_solicitud LIKE ? OR m.nombre LIKE ? OR dep.nombre LIKE ? OR r.nombre LIKE ?)';
-      params.push(`%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`, `%${busqueda}%`);
+      query += ` AND (
+        p.nombre LIKE ? OR 
+        p.apellido_paterno LIKE ? OR 
+        p.apellido_materno LIKE ? OR
+        t.numero_solicitud LIKE ? OR
+        m.nombre LIKE ? OR
+        dep.nombre LIKE ?
+      )`;
+      const searchTerm = `%${busqueda}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    if (fase_rechazo) {
-      query += ' AND t.fase_actual = ?';
-      params.push(fase_rechazo);
-    }
-
-    query += ' ORDER BY t.updated_at DESC';
-
-    const [tramites] = await connection.query(query, params);
-
-    // Para cada trámite, obtener personas y detectar si fue por competencia
-    for (let tramite of tramites) {
-      const [personas] = await connection.query(
-        `SELECT 
-          p.*,
-          pu.nombre as puesto_nombre,
-          pu.es_competencia_municipal,
-          pu.motivo_no_competencia
-        FROM personas_tramite_alta p
-        LEFT JOIN puestos pu ON p.puesto_id = pu.id
-        WHERE p.tramite_alta_id = ?
-        ORDER BY p.created_at ASC`,
-        [tramite.id]
-      );
-
-      // Detectar motivo de rechazo según la fase
-      let motivo_rechazo_general = '';
-      let etapa_rechazo = '';
-
-      if (tramite.fase_actual === 'rechazado_no_corresponde') {
-        etapa_rechazo = 'Validación de Personal (Filtro de Competencia)';
-        const personasNoCompetencia = personas.filter(p => !p.es_competencia_municipal);
-        if (personasNoCompetencia.length > 0) {
-          motivo_rechazo_general = `Puesto(s) fuera de competencia municipal: ${personasNoCompetencia.map(p => p.puesto_nombre).join(', ')}`;
-        }
-      } else if (tramite.fase_actual === 'rechazado') {
-        etapa_rechazo = 'Dictamen C3';
-        motivo_rechazo_general = tramite.observaciones || 'Rechazado por C3';
+    if (etapa_rechazo) {
+      if (etapa_rechazo === 'competencia') {
+        query += ' AND pu.es_competencia_municipal = FALSE';
+      } else if (etapa_rechazo === 'c3') {
+        query += ' AND t.fase_actual = ?';
+        params.push('rechazado');
+      } else if (etapa_rechazo === 'c5') {
+        query += ' AND t.fase_actual = ? AND pu.es_competencia_municipal = TRUE';
+        params.push('validacion_personal');
       }
+    }
 
-      // Obtener historial para ver en qué momento fue rechazado
-      const [historial] = await connection.query(
-        `SELECT comentario, created_at 
-         FROM historial_tramites_alta 
-         WHERE tramite_alta_id = ? AND fase_nueva IN ('rechazado', 'rechazado_no_corresponde')
-         ORDER BY created_at DESC LIMIT 1`,
-        [tramite.id]
-      );
+    query += ' ORDER BY p.updated_at DESC';
 
-      tramite.personas = personas;
-      tramite.etapa_rechazo = etapa_rechazo;
-      tramite.motivo_rechazo_general = motivo_rechazo_general;
-      tramite.fecha_rechazo = historial[0]?.created_at || tramite.updated_at;
-      tramite.comentario_rechazo = historial[0]?.comentario || '';
+    const [personas] = await connection.query(query, params);
+
+    // Para cada persona, construir documentación detallada
+    for (let persona of personas) {
+      const fecha = new Date(persona.updated_at);
+      
+      persona.documentacion_detallada = {
+        nombre_completo: persona.nombre_completo,
+        puesto_solicitado: persona.puesto_solicitado,
+        numero_solicitud: persona.numero_solicitud,
+        etapa_rechazo: persona.etapa_rechazo_descriptiva,
+        motivo_especifico: persona.motivo_especifico || persona.motivo_rechazo || 'Sin especificar',
+        fecha_completa: fecha.toLocaleDateString('es-MX', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        hora: fecha.toLocaleTimeString('es-MX'),
+        fecha_iso: persona.updated_at,
+        proceso: `Trámite ${persona.numero_solicitud} - ${persona.dependencia_nombre} - ${persona.municipio_nombre}`,
+        observaciones_completas: persona.observaciones_c3 || persona.motivo_rechazo || 'Sin observaciones adicionales',
+        analista_responsable: persona.analista_nombre,
+        validador_c3: persona.validador_c3_nombre || 'No asignado',
+        region: persona.region_nombre,
+        // Texto formateado para copiar
+        texto_copiable: `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 REGISTRO DE PERSONA RECHAZADA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 ELEMENTO: ${persona.nombre_completo}
+📄 TRÁMITE: ${persona.numero_solicitud}
+🏛️ DEPENDENCIA: ${persona.dependencia_nombre}
+🌎 MUNICIPIO: ${persona.municipio_nombre} (${persona.region_nombre})
+
+⚠️ ETAPA DE RECHAZO:
+   ${persona.etapa_rechazo_descriptiva}
+
+📝 MOTIVO ESPECÍFICO:
+   ${persona.motivo_especifico || persona.motivo_rechazo || 'Sin especificar'}
+
+💼 PUESTO SOLICITADO: ${persona.puesto_solicitado}
+${persona.es_competencia_municipal === false ? '   ⚠️ PUESTO FUERA DE COMPETENCIA MUNICIPAL' : ''}
+
+📅 FECHA DE RECHAZO: ${fecha.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+🕐 HORA: ${fecha.toLocaleTimeString('es-MX')}
+
+👨‍💼 ANALISTA C5: ${persona.analista_nombre}
+${persona.validador_c3_nombre ? `👨‍⚖️ VALIDADOR C3: ${persona.validador_c3_nombre}` : ''}
+
+📋 OBSERVACIONES COMPLETAS:
+   ${persona.observaciones_c3 || persona.motivo_rechazo || 'Sin observaciones adicionales'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`.trim()
+      };
     }
 
     res.json({
       success: true,
-      data: tramites,
-      total: tramites.length,
-      message: `${tramites.length} trámites rechazados encontrados`
+      data: personas,
+      total: personas.length,
+      message: `${personas.length} persona(s) rechazada(s) encontrada(s)`
     });
 
   } catch (error) {
-    console.error('Error al obtener trámites rechazados:', error);
+    console.error('Error al obtener personas rechazadas:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al obtener trámites rechazados',
+      message: 'Error al obtener personas rechazadas',
       error: error.message
     });
   } finally {
@@ -1576,6 +1646,32 @@ export const emitirDecisionFinalC5 = async (req, res) => {
           return res.status(400).json({
             success: false,
             message: `La persona ${persona_id} no tiene propuesta de cambio de puesto`
+          });
+        }
+
+        // ⚠️ SEGUNDO FILTRO DE COMPETENCIA: Validar que el puesto propuesto sea de competencia municipal
+        const [puestoPropuesto] = await connection.query(
+          'SELECT id, nombre, es_competencia_municipal, motivo_no_competencia FROM puestos WHERE id = ?',
+          [persona.puesto_propuesto_c3_id]
+        );
+
+        if (puestoPropuesto.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: `El puesto propuesto no existe`
+          });
+        }
+
+        // Si el puesto propuesto NO es de competencia municipal, BLOQUEAR la decisión
+        if (puestoPropuesto[0].es_competencia_municipal === false || puestoPropuesto[0].es_competencia_municipal === 0) {
+          return res.status(400).json({
+            success: false,
+            message: '⚠️ PUESTO NO CORRESPONDE: No puede aceptar un puesto fuera de competencia municipal',
+            detalles: {
+              puesto_propuesto: puestoPropuesto[0].nombre,
+              motivo: puestoPropuesto[0].motivo_no_competencia || 'Puesto fuera de competencia de C5',
+              accion_requerida: 'Debe seleccionar el puesto original o rechazar la persona'
+            }
           });
         }
 
