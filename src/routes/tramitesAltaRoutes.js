@@ -2,6 +2,10 @@ import express from 'express';
 import {
   crearNuevaSolicitud,
   obtenerMisSolicitudes,
+  obtenerDashboardMunicipios,
+  obtenerMunicipiosDisponibles,
+  agregarMunicipioDashboard,
+  eliminarMunicipioDashboard,
   obtenerSolicitudPorId,
   agregarPersona,
   obtenerPersonasPorTramite,
@@ -67,6 +71,208 @@ const validarNuevaSolicitud = [
     .optional()
     .trim()
 ];
+
+// ============================================
+// DASHBOARD DE MUNICIPIOS
+// ============================================
+
+/**
+ * @swagger
+ * /api/tramites/alta/dashboard-municipios:
+ *   get:
+ *     summary: Obtener dashboard de municipios con estadísticas de trámites
+ *     description: |
+ *       **Vista principal del analista para gestionar trámites por municipio**
+ *       
+ *       **Colores visuales:**
+ *       - 🟢 Verde: Todos los trámites finalizados correctamente
+ *       - 🟡 Amarillo: Municipio con trámites en proceso de alta
+ *       - ⚪ Gris: Municipio sin trámites asignados
+ *       
+ *       **Acciones por municipio:**
+ *       - `Iniciar proceso`: Solo si no hay trámites (botón visible)
+ *       - `Ver proceso`: Cuando ya existe un trámite iniciado
+ *       - `Ver detalles`: Siempre disponible para consultar resumen
+ *       
+ *       **Funcionalidad:**
+ *       - Organiza trámites por municipio de la región del analista
+ *       - Muestra estadísticas: validados, rechazados, en proceso
+ *       - Facilita navegación y seguimiento de procesos
+ *     tags:
+ *       - 📊 Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Dashboard cargado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     analista:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                         nombre:
+ *                           type: string
+ *                         region_id:
+ *                           type: integer
+ *                     municipios:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           municipio_id:
+ *                             type: integer
+ *                           municipio_nombre:
+ *                             type: string
+ *                             example: "Huauchinango"
+ *                           region_nombre:
+ *                             type: string
+ *                           estado_visual:
+ *                             type: string
+ *                             enum: [gris, amarillo, verde]
+ *                             example: "verde"
+ *                           estado_descriptivo:
+ *                             type: string
+ *                             example: "Trámites finalizados correctamente"
+ *                           estadisticas:
+ *                             type: object
+ *                             properties:
+ *                               total_tramites:
+ *                                 type: integer
+ *                               validados:
+ *                                 type: integer
+ *                                 example: 5
+ *                               rechazados:
+ *                                 type: integer
+ *                                 example: 1
+ *                               en_proceso:
+ *                                 type: integer
+ *                                 example: 0
+ *                           acciones:
+ *                             type: object
+ *                             properties:
+ *                               boton_principal:
+ *                                 type: string
+ *                                 enum: [iniciar_proceso, ver_proceso]
+ *                               puede_iniciar:
+ *                                 type: boolean
+ *                               puede_ver_proceso:
+ *                                 type: boolean
+ *                               puede_ver_detalles:
+ *                                 type: boolean
+ *       403:
+ *         description: Solo analistas pueden acceder
+ */
+router.get(
+  '/dashboard-municipios',
+  requireRole('analista'),
+  obtenerDashboardMunicipios
+);
+
+/**
+ * @swagger
+ * /api/tramites/alta/municipios-disponibles:
+ *   get:
+ *     summary: Obtener municipios disponibles para agregar (catálogo)
+ *     tags: [📊 Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de municipios disponibles
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       municipio_id:
+ *                         type: integer
+ *                       municipio_nombre:
+ *                         type: string
+ *                       region_nombre:
+ *                         type: string
+ *                 total:
+ *                   type: integer
+ */
+router.get('/municipios-disponibles', requireRole('analista'), obtenerMunicipiosDisponibles);
+
+/**
+ * @swagger
+ * /api/tramites/alta/dashboard-municipios/agregar:
+ *   post:
+ *     summary: Agregar un municipio al dashboard personal
+ *     tags: [📊 Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               municipio_id:
+ *                 type: integer
+ *                 example: 42
+ *     responses:
+ *       201:
+ *         description: Municipio agregado exitosamente
+ *       400:
+ *         description: Municipio ya existe o no pertenece a la región
+ */
+router.post('/dashboard-municipios/agregar',
+  requireRole('analista'),
+  [
+    body('municipio_id')
+      .notEmpty().withMessage('El ID del municipio es requerido')
+      .isInt().withMessage('El ID debe ser un número')
+  ],
+  validate,
+  agregarMunicipioDashboard
+);
+
+/**
+ * @swagger
+ * /api/tramites/alta/dashboard-municipios/{dashboard_id}:
+ *   delete:
+ *     summary: Eliminar un municipio del dashboard (solo si no tiene trámites)
+ *     tags: [📊 Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: dashboard_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Municipio eliminado exitosamente
+ *       400:
+ *         description: No se puede eliminar porque tiene trámites iniciados
+ */
+router.delete('/dashboard-municipios/:dashboard_id', requireRole('analista'), eliminarMunicipioDashboard);
+
+// ============================================
+// PASO 1: NUEVA SOLICITUD DE ALTA
+// ============================================
 
 /**
  * @swagger

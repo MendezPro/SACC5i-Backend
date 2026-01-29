@@ -128,6 +128,388 @@ export const crearNuevaSolicitud = async (req, res) => {
   }
 };
 
+// ============================================
+// DASHBOARD PERSONALIZADO DE MUNICIPIOS
+// ============================================
+
+/**
+ * DASHBOARD: Obtener municipios que el analista agregó a su dashboard
+ * CORRECCIÓN: Solo muestra municipios agregados manualmente, NO todos
+ */
+export const obtenerDashboardMunicipios = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    // Obtener información del analista
+    const [usuario] = await connection.query(
+      'SELECT id, nombre_completo, region_id FROM usuarios WHERE id = ? AND rol = ?',
+      [req.userId, 'analista']
+    );
+
+    if (usuario.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Solo los analistas pueden acceder al dashboard de municipios'
+      });
+    }
+
+    const analista = usuario[0];
+
+    // Obtener SOLO los municipios que el analista agregó a su dashboard
+    const [municipiosAgregados] = await connection.query(
+      `SELECT 
+        amd.id as dashboard_id,
+        m.id as municipio_id,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre,
+        amd.created_at as fecha_agregado
+       FROM analista_municipios_dashboard amd
+       INNER JOIN municipios m ON amd.municipio_id = m.id
+       INNER JOIN regiones r ON m.region_id = r.id
+       WHERE amd.usuario_analista_id = ?
+       ORDER BY amd.created_at DESC`,
+      [req.userId]
+    );
+
+    // Para cada municipio agregado, obtener estadísticas
+    const municipiosConEstadisticas = [];
+
+    for (const municipio of municipiosAgregados) {
+      // Obtener estadísticas de trámites
+      const [stats] = await connection.query(
+        `SELECT 
+          COUNT(DISTINCT t.id) as total_tramites,
+          COUNT(DISTINCT CASE WHEN t.fase_actual IN ('validado_c3', 'finalizado') THEN t.id END) as tramites_finalizados,
+          COUNT(DISTINCT CASE WHEN t.fase_actual NOT IN ('validado_c3', 'finalizado', 'rechazado') THEN t.id END) as tramites_en_proceso,
+          COUNT(p.id) as total_personas,
+          SUM(CASE WHEN p.validado = TRUE AND p.rechazado = FALSE THEN 1 ELSE 0 END) as personas_validadas,
+          SUM(CASE WHEN p.rechazado = TRUE THEN 1 ELSE 0 END) as personas_rechazadas,
+          SUM(CASE WHEN p.validado = FALSE AND p.rechazado = FALSE THEN 1 ELSE 0 END) as personas_en_proceso
+        FROM tramites_alta t
+        LEFT JOIN personas_tramite_alta p ON p.tramite_alta_id = t.id
+        WHERE t.municipio_id = ? AND t.usuario_analista_c5_id = ?`,
+        [municipio.municipio_id, req.userId]
+      );
+
+      const estadisticas = stats[0];
+
+      // Obtener el trámite más reciente
+      const [ultimoTramite] = await connection.query(
+        `SELECT id, numero_solicitud, fase_actual, updated_at
+         FROM tramites_alta
+         WHERE municipio_id = ? AND usuario_analista_c5_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [municipio.municipio_id, req.userId]
+      );
+
+      // Determinar estado visual
+      let estadoVisual = 'gris';
+      let estadoDescriptivo = 'Sin trámites';
+
+      if (estadisticas.total_tramites > 0) {
+        const todasFinalizadas = estadisticas.tramites_en_proceso === 0;
+        const hayProceso = estadisticas.tramites_en_proceso > 0;
+
+        if (todasFinalizadas && estadisticas.tramites_finalizados > 0) {
+          estadoVisual = 'verde';
+          estadoDescriptivo = 'Trámites finalizados correctamente';
+        } else if (hayProceso) {
+          estadoVisual = 'amarillo';
+          estadoDescriptivo = 'En proceso de alta';
+        }
+      }
+
+      const tieneTramites = estadisticas.total_tramites > 0;
+
+      municipiosConEstadisticas.push({
+        dashboard_id: municipio.dashboard_id,
+        municipio_id: municipio.municipio_id,
+        municipio_nombre: municipio.municipio_nombre,
+        region_nombre: municipio.region_nombre,
+        estado_visual: estadoVisual,
+        estado_descriptivo: estadoDescriptivo,
+        estadisticas: {
+          total_tramites: estadisticas.total_tramites,
+          tramites_finalizados: estadisticas.tramites_finalizados,
+          tramites_en_proceso: estadisticas.tramites_en_proceso,
+          total_personas: estadisticas.total_personas,
+          validados: estadisticas.personas_validadas,
+          rechazados: estadisticas.personas_rechazadas,
+          en_proceso: estadisticas.personas_en_proceso
+        },
+        ultimo_tramite: ultimoTramite.length > 0 ? {
+          id: ultimoTramite[0].id,
+          numero_solicitud: ultimoTramite[0].numero_solicitud,
+          fase_actual: ultimoTramite[0].fase_actual,
+          fecha_actualizacion: ultimoTramite[0].updated_at
+        } : null,
+        acciones: {
+          boton_principal: tieneTramites ? 'ver_proceso' : 'iniciar_proceso',
+          puede_iniciar: !tieneTramites,
+          puede_ver_proceso: tieneTramites,
+          puede_ver_detalles: true,
+          puede_eliminar: !tieneTramites // Solo puede eliminar si NO tiene trámites
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        analista: {
+          id: analista.id,
+          nombre: analista.nombre_completo,
+          region_id: analista.region_id
+        },
+        municipios: municipiosConEstadisticas,
+        total_municipios: municipiosConEstadisticas.length,
+        resumen_general: {
+          municipios_sin_tramites: municipiosConEstadisticas.filter(m => m.estado_visual === 'gris').length,
+          municipios_en_proceso: municipiosConEstadisticas.filter(m => m.estado_visual === 'amarillo').length,
+          municipios_finalizados: municipiosConEstadisticas.filter(m => m.estado_visual === 'verde').length
+        }
+      },
+      message: municipiosConEstadisticas.length === 0 
+        ? 'Dashboard vacío. Agrega municipios con el botón +' 
+        : `Dashboard cargado: ${municipiosConEstadisticas.length} municipio(s)`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener dashboard de municipios:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener dashboard de municipios',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Obtener catálogo de municipios disponibles para agregar al dashboard
+ * SOLO muestra municipios de la región del analista que AÚN NO agregó
+ */
+export const obtenerMunicipiosDisponibles = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const [usuario] = await connection.query(
+      'SELECT id, region_id FROM usuarios WHERE id = ? AND rol = ?',
+      [req.userId, 'analista']
+    );
+
+    if (usuario.length === 0 || !usuario[0].region_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Usuario no tiene región asignada'
+      });
+    }
+
+    // Obtener municipios de la región que NO están en el dashboard
+    const [municipiosDisponibles] = await connection.query(
+      `SELECT 
+        m.id as municipio_id,
+        m.nombre as municipio_nombre,
+        r.nombre as region_nombre
+       FROM municipios m
+       INNER JOIN regiones r ON m.region_id = r.id
+       WHERE m.region_id = ?
+         AND m.id NOT IN (
+           SELECT municipio_id 
+           FROM analista_municipios_dashboard 
+           WHERE usuario_analista_id = ?
+         )
+       ORDER BY m.nombre ASC`,
+      [usuario[0].region_id, req.userId]
+    );
+
+    res.json({
+      success: true,
+      data: municipiosDisponibles,
+      total: municipiosDisponibles.length,
+      message: `${municipiosDisponibles.length} municipio(s) disponible(s) para agregar`
+    });
+
+  } catch (error) {
+    console.error('Error al obtener municipios disponibles:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener municipios disponibles',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Agregar un municipio al dashboard del analista
+ * REGLA: Solo municipios de su región
+ */
+export const agregarMunicipioDashboard = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { municipio_id } = req.body;
+
+    if (!municipio_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'El ID del municipio es requerido'
+      });
+    }
+
+    // Verificar que el analista existe y obtener su región
+    const [usuario] = await connection.query(
+      'SELECT id, region_id FROM usuarios WHERE id = ? AND rol = ?',
+      [req.userId, 'analista']
+    );
+
+    if (usuario.length === 0 || !usuario[0].region_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Usuario no válido o sin región asignada'
+      });
+    }
+
+    // Verificar que el municipio existe y pertenece a la región del analista
+    const [municipio] = await connection.query(
+      `SELECT m.id, m.nombre, r.nombre as region_nombre
+       FROM municipios m
+       INNER JOIN regiones r ON m.region_id = r.id
+       WHERE m.id = ? AND m.region_id = ?`,
+      [municipio_id, usuario[0].region_id]
+    );
+
+    if (municipio.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Municipio no encontrado o no pertenece a tu región'
+      });
+    }
+
+    // Verificar que no esté ya agregado
+    const [yaExiste] = await connection.query(
+      'SELECT id FROM analista_municipios_dashboard WHERE usuario_analista_id = ? AND municipio_id = ?',
+      [req.userId, municipio_id]
+    );
+
+    if (yaExiste.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Este municipio ya está en tu dashboard'
+      });
+    }
+
+    // Agregar al dashboard
+    const [result] = await connection.query(
+      'INSERT INTO analista_municipios_dashboard (usuario_analista_id, municipio_id) VALUES (?, ?)',
+      [req.userId, municipio_id]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: `Municipio "${municipio[0].nombre}" agregado al dashboard`,
+      data: {
+        dashboard_id: result.insertId,
+        municipio_id: municipio[0].id,
+        municipio_nombre: municipio[0].nombre,
+        region_nombre: municipio[0].region_nombre
+      }
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al agregar municipio al dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al agregar municipio al dashboard',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Eliminar un municipio del dashboard
+ * REGLA: Solo si NO tiene trámites iniciados
+ */
+export const eliminarMunicipioDashboard = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    const { dashboard_id } = req.params;
+
+    // Verificar que el registro existe y pertenece al analista
+    const [dashboard] = await connection.query(
+      `SELECT amd.id, amd.municipio_id, m.nombre as municipio_nombre
+       FROM analista_municipios_dashboard amd
+       INNER JOIN municipios m ON amd.municipio_id = m.id
+       WHERE amd.id = ? AND amd.usuario_analista_id = ?`,
+      [dashboard_id, req.userId]
+    );
+
+    if (dashboard.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Municipio no encontrado en tu dashboard'
+      });
+    }
+
+    const municipioId = dashboard[0].municipio_id;
+
+    // Verificar que NO tenga trámites iniciados
+    const [tramites] = await connection.query(
+      'SELECT COUNT(*) as total FROM tramites_alta WHERE municipio_id = ? AND usuario_analista_c5_id = ?',
+      [municipioId, req.userId]
+    );
+
+    if (tramites[0].total > 0) {
+      return res.status(400).json({
+        success: false,
+        message: '⚠️ No puedes eliminar este municipio porque ya tiene trámites iniciados',
+        detalles: {
+          municipio: dashboard[0].municipio_nombre,
+          total_tramites: tramites[0].total
+        }
+      });
+    }
+
+    // Eliminar del dashboard
+    await connection.query(
+      'DELETE FROM analista_municipios_dashboard WHERE id = ?',
+      [dashboard_id]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: `Municipio "${dashboard[0].municipio_nombre}" eliminado del dashboard`
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error al eliminar municipio del dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al eliminar municipio del dashboard',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+};
+
 /**
  * Obtener todas las solicitudes de ALTA del analista
  */
